@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Three.js 坦克 Online (真人對戰版)</title>
+    <title>Three.js 坦克 Online (角色修復版)</title>
     <style>
         body { margin: 0; overflow: hidden; background: #050505; font-family: "Segoe UI", sans-serif; user-select: none; color: white; }
         #canvas-container { position: absolute; width: 100%; height: 100vh; z-index: 1; }
@@ -15,7 +15,6 @@
             z-index: 2; border: 2px solid #00ffff; border-radius: 10px; background: rgba(0,0,0,0.6); transform: scaleX(-1); 
         }
         #hp-bar { position: absolute; top: 20px; left: 20px; z-index: 5; font-size: 24px; text-shadow: 2px 2px 0 #000; }
-        .hp-icon { color: #ff3333; margin-right: 5px; }
         
         /* UI Overlay */
         #ui-layer {
@@ -45,7 +44,6 @@
         .btn-sm { background: rgba(0,255,255,0.2); border: 1px solid #0ff; color: #fff; padding: 5px 10px; cursor: pointer; }
         .btn-sm.active { background: #0ff; color: #000; }
         
-        /* Damage Effect */
         #damage-overlay { position: absolute; width: 100%; height: 100%; background: red; opacity: 0; pointer-events: none; z-index: 4; transition: opacity 0.1s; }
     </style>
 </head>
@@ -70,6 +68,7 @@
 <div id="hp-bar">
     <div>我方: <span id="my-hp">❤️❤️❤️❤️❤️</span></div>
     <div style="font-size: 18px; color: #aaa; margin-top:5px;">敵方: <span id="enemy-hp">❤️❤️❤️❤️❤️</span></div>
+    <div id="role-debug" style="font-size: 14px; color: #aaa; margin-top: 5px;"></div>
 </div>
 
 <div id="settings-panel">
@@ -95,13 +94,10 @@
 
 <!-- Firebase Module -->
 <script type="module">
-    // 使用 CDN 導入 Firebase 模組，這是在瀏覽器中直接運行所必需的
     import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-    import { getAnalytics } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-analytics.js";
     import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
     import { getFirestore, collection, doc, setDoc, updateDoc, onSnapshot, getDocs, deleteDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-    // --- Firebase Setup (使用您提供的設定) ---
     const firebaseConfig = {
       apiKey: "AIzaSyAwgF1STeKUpjKU87cvS3cJqoHUp8mt_-8",
       authDomain: "tank-94148.firebaseapp.com",
@@ -112,22 +108,17 @@
       measurementId: "G-C2SGZJQKCY"
     };
 
-    // Initialize Firebase
     const app = initializeApp(firebaseConfig);
-    const analytics = getAnalytics(app); // 初始化 Analytics (選擇性)
-    const auth = getAuth(app);           // 遊戲核心：身份驗證
-    const db = getFirestore(app);        // 遊戲核心：即時資料庫
-    
-    // 使用您的 Project ID 作為 appId 前綴，確保資料路徑正確
+    const auth = getAuth(app);
+    const db = getFirestore(app);
     const appId = 'tank-94148-game'; 
     
     let userId = null;
     let matchId = null;
-    let myRole = null; // 'p1' (Host) or 'p2' (Client)
+    let myRole = null; 
     let unsubscribeMatch = null;
     let lastNetworkUpdate = 0;
 
-    // --- Game Logic Interface ---
     window.findMatch = async function() {
         const btn = document.getElementById('find-match-btn');
         const status = document.getElementById('lobby-status');
@@ -135,14 +126,10 @@
         status.innerText = "正在連線伺服器...";
 
         try {
-            // 1. Auth
             const userCredential = await signInAnonymously(auth);
             userId = userCredential.user.uid;
             status.innerText = "搜尋對戰中...";
 
-            // 2. Search for existing waiting rooms
-            // 修正路徑：使用您專案的集合結構
-            // 注意：請確保您的 Firestore 規則允許讀寫
             const battlesRef = collection(db, 'matches'); 
             const snapshot = await getDocs(battlesRef);
             let foundRoom = null;
@@ -151,14 +138,12 @@
                 const data = doc.data();
                 const now = Date.now();
                 const created = data.createdAt ? data.createdAt.toMillis() : 0;
-                // 尋找 1 小時內建立且狀態為 waiting 的房間
                 if (data.status === 'waiting' && (now - created < 3600000) && !foundRoom) {
                     foundRoom = doc.id;
                 }
             });
 
             if (foundRoom) {
-                // Join existing room
                 matchId = foundRoom;
                 myRole = 'p2';
                 status.innerText = "找到房間！正在加入...";
@@ -172,7 +157,6 @@
                 });
                 
             } else {
-                // Create new room
                 myRole = 'p1';
                 status.innerText = "建立房間中，等待挑戰者...";
                 const newMatchRef = doc(collection(db, 'matches'));
@@ -187,17 +171,16 @@
                     events: []
                 });
             }
+            
+            // Set global role for game loop
+            window.gameState.myRole = myRole;
+            document.getElementById('role-debug').innerText = `Role: ${myRole}`;
 
-            // 3. Start Listening
             listenToMatch();
 
         } catch (e) {
             console.error("Matchmaking error:", e);
-            let msg = e.message;
-            if (e.code === 'auth/configuration-not-found' || e.code === 'auth/operation-not-allowed') {
-                msg = "請至 Firebase Console 開啟 Authentication > Sign-in method > 匿名登入 (Anonymous)";
-            }
-            status.innerText = "連線錯誤: " + msg;
+            status.innerText = "連線錯誤: " + e.message;
             btn.disabled = false;
         }
     };
@@ -218,30 +201,28 @@
             if (myRole === 'p1' && data.status === 'waiting') {
                 statusEl.innerText = "等待對手加入...";
             } else if (data.status === 'playing') {
-                // Start Game!
                 if (document.getElementById('ui-layer').style.display !== 'none') {
-                    startGame();
+                    // Pass role to game start
+                    window.startGame(myRole);
                 }
                 
-                // Sync remote player state
                 const remoteRole = myRole === 'p1' ? 'p2' : 'p1';
                 const remoteStateStr = data[remoteRole + 'State'];
                 if (remoteStateStr) {
                     const rState = JSON.parse(remoteStateStr);
-                    updateRemoteTank(rState);
+                    window.updateRemoteTank(rState);
                 }
             } else if (data.status === 'finished') {
-                endGame(data.winner === myRole);
+                window.endGame(data.winner === myRole);
             }
         });
     }
 
-    // --- Networking Functions called by Game Loop ---
     window.sendGameState = async function(pos, rot, turretRot, barrelRot) {
         if (!matchId || !userId) return;
         
         const now = Date.now();
-        if (now - lastNetworkUpdate < 100) return; // Limit to 10 updates/sec
+        if (now - lastNetworkUpdate < 50) return; // Increase update rate slightly (20fps)
         lastNetworkUpdate = now;
 
         const stateObj = {
@@ -254,13 +235,13 @@
 
         const updateData = {};
         updateData[myRole + 'State'] = JSON.stringify(stateObj);
-        updateData['updatedAt'] = serverTimestamp();
+        // updateData['updatedAt'] = serverTimestamp(); // Reduce writes
 
         try {
             const matchRef = doc(db, 'matches', matchId);
             await updateDoc(matchRef, updateData);
         } catch (e) {
-            console.warn("Update failed", e);
+            // console.warn("Update failed", e);
         }
     };
 
@@ -277,12 +258,11 @@
             const matchRef = doc(db, 'matches', matchId);
             await updateDoc(matchRef, {
                 status: 'finished',
-                winner: myRole === 'p1' ? 'p2' : 'p1' // Opponent wins
+                winner: myRole === 'p1' ? 'p2' : 'p1'
             });
         }
     }
 
-    // Monitor fire events
     let lastProcessedFireP1 = 0;
     let lastProcessedFireP2 = 0;
 
@@ -290,6 +270,7 @@
         if(!snap.exists()) return;
         const data = snap.data();
         
+        // Listen for ENEMY fire
         const remoteRole = myRole === 'p1' ? 'p2' : 'p1';
         const remoteFireKey = `lastFire${remoteRole}`;
         const timestamp = data[remoteFireKey];
@@ -310,11 +291,9 @@
     function getInitialState() {
         return { x: 0, y: 0, z: 0, ry: 0, ty: 0, bx: 0, hp: 5 };
     }
-
 </script>
 
 <script>
-    // --- Global Game State & Config ---
     const CONFIG = { smooth: 0.15, aimSmooth: 0.02, sensitivity: 2.5, deadzone: 0.1, fireCD: 500 }; 
     const MAP_SIZE = 150; 
     const BOUNDS = MAP_SIZE / 2 - 2;
@@ -326,13 +305,13 @@
         mirrored: true, 
         inverted: false,
         style: 'standard',
-        lastFire: 0
+        lastFire: 0,
+        myRole: null 
     };
 
     const input = { move: {x:0, y:0}, aim: {x:0, y:0}, head: {x:0} };
     const target = { move: {x:0, y:0}, aim: {x:0, y:0}, head: {x:0} };
     
-    // Three.js Vars
     let scene, camera, renderer;
     let myTank, myTurret, myBarrel;
     let enemyTank, enemyTurret, enemyBarrel;
@@ -340,11 +319,24 @@
     const clock = new THREE.Clock();
 
     // --- Initialization ---
-    function startGame() {
+    window.startGame = function(role) {
         document.getElementById('ui-layer').style.display = 'none';
         window.gameState.running = true;
-        
-        // P1 at +60Z, P2 at -60Z. But visual perspective handled by camera.
+        window.gameState.myRole = role; // Ensure global state knows role
+
+        if(myTank && enemyTank) {
+            if(role === 'p1') {
+                myTank.position.set(0, 0, 60);
+                myTank.rotation.y = Math.PI; // Face enemy
+                enemyTank.position.set(0, 0, -60);
+                enemyTank.rotation.y = 0;
+            } else {
+                myTank.position.set(0, 0, -60);
+                myTank.rotation.y = 0; // Face enemy
+                enemyTank.position.set(0, 0, 60);
+                enemyTank.rotation.y = Math.PI;
+            }
+        }
     }
 
     function initThree() {
@@ -361,29 +353,31 @@
         light.shadow.mapSize.width = 2048; light.shadow.mapSize.height = 2048;
         scene.add(light); scene.add(new THREE.AmbientLight(0xffffff, 0.6));
 
-        // Environment
         const plane = new THREE.Mesh(new THREE.PlaneGeometry(MAP_SIZE, MAP_SIZE), new THREE.MeshStandardMaterial({color:0x333333, roughness:0.8}));
         plane.rotation.x = -Math.PI/2; plane.receiveShadow = true; plane.userData.type='ground'; scene.add(plane);
         const grid = new THREE.GridHelper(MAP_SIZE, 40, 0x555555, 0x222222); scene.add(grid);
         createWalls();
 
-        // Create Tanks
         // My Tank (Green)
         const p1 = createModel(0x4B5320, false);
         myTank = p1.root; myTurret = p1.turret; myBarrel = p1.barrel;
-        myTank.position.set(0, 0, 60); 
-        myTank.rotation.y = Math.PI;
         addLaser(myBarrel);
+        
+        // Add "YOU" marker
+        const markerGeo = new THREE.ConeGeometry(0.5, 1, 8);
+        markerGeo.rotateX(Math.PI);
+        const marker = new THREE.Mesh(markerGeo, new THREE.MeshBasicMaterial({color: 0x00ff00}));
+        marker.position.y = 4;
+        myTank.add(marker);
+        
         scene.add(myTank);
 
         // Enemy Tank (Red)
         const p2 = createModel(0xAA3333, true);
         enemyTank = p2.root; enemyTurret = p2.turret; enemyBarrel = p2.barrel;
-        enemyTank.position.set(0, 0, -60);
         scene.add(enemyTank);
 
         changeStyle('standard');
-        
         requestAnimationFrame(animate);
     }
 
@@ -534,7 +528,7 @@
         let s=1; const anim = ()=>{ s+=0.3; m.scale.setScalar(s); m.material.opacity-=0.08; if(s<4)requestAnimationFrame(anim); else scene.remove(m); }; anim();
     }
 
-    function endGame(win) {
+    window.endGame = function(win) {
         window.gameState.running = false;
         document.getElementById('ui-layer').style.display = 'flex';
         document.getElementById('lobby-panel').style.display = 'none';
