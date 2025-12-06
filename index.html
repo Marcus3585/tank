@@ -3,120 +3,82 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Three.js 坦克大戰 (PvE 模式)</title>
+    <title>Three.js 坦克 Online (真人對戰版)</title>
     <style>
-        body { margin: 0; overflow: hidden; background-color: #1a1a1a; font-family: "Microsoft JhengHei", Arial, sans-serif; user-select: none; }
-        
-        #canvas-container { position: absolute; top: 0; left: 0; width: 100%; height: 100vh; z-index: 1; }
+        body { margin: 0; overflow: hidden; background: #050505; font-family: "Segoe UI", sans-serif; user-select: none; color: white; }
+        #canvas-container { position: absolute; width: 100%; height: 100vh; z-index: 1; }
         .input_video { display: none; }
         
-        /* 2D HUD 畫布 */
-        #output_canvas {
-            position: absolute; top: 20px; right: 20px;
-            width: 320px; height: 240px;
-            z-index: 2;
-            border: 2px solid rgba(0, 255, 255, 0.3);
-            border-radius: 10px;
-            background: rgba(0, 0, 0, 0.6);
-            transform: scaleX(-1); 
-            transition: transform 0.3s ease;
+        /* HUD */
+        #output_canvas { 
+            position: absolute; top: 20px; right: 20px; width: 320px; height: 240px; 
+            z-index: 2; border: 2px solid #00ffff; border-radius: 10px; background: rgba(0,0,0,0.6); transform: scaleX(-1); 
         }
-
-        /* UI 元素 */
-        #hp-display {
-            position: absolute; top: 20px; left: 20px; z-index: 5;
-            font-size: 32px; color: #ff3333; text-shadow: 2px 2px 0 #000;
-        }
-
-        #game-message {
-            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-            z-index: 20; color: white; text-align: center;
-            display: none; /* 預設隱藏 */
-            background: rgba(0, 0, 0, 0.85);
-            padding: 40px; border-radius: 20px; border: 2px solid #fff;
-        }
-        #game-message h1 { font-size: 48px; margin: 0 0 20px 0; }
-        #restart-btn {
-            background: #ff3333; color: white; border: none; padding: 15px 30px;
-            font-size: 24px; cursor: pointer; border-radius: 10px; font-family: inherit;
-        }
-        #restart-btn:hover { background: #ff6666; }
-
-        #loading {
-            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-            z-index: 10; color: #00ffff; font-size: 24px; font-weight: bold;
-            background: rgba(0,0,0,0.8); padding: 30px; border-radius: 15px;
-            border: 1px solid #00ffff;
-            box-shadow: 0 0 20px rgba(0, 255, 255, 0.2);
-            text-align: center;
-        }
-
-        #instructions {
-            position: absolute; bottom: 20px; left: 20px; z-index: 2;
-            color: white; background: rgba(0,0,0,0.5); padding: 15px;
-            border-radius: 8px; pointer-events: none;
-            border-left: 4px solid #00ff00;
-            width: 250px;
-        }
+        #hp-bar { position: absolute; top: 20px; left: 20px; z-index: 5; font-size: 24px; text-shadow: 2px 2px 0 #000; }
+        .hp-icon { color: #ff3333; margin-right: 5px; }
         
-        #settings-panel {
-            position: absolute; top: 280px; right: 20px; z-index: 5;
-            display: flex; flex-direction: column; gap: 10px;
+        /* UI Overlay */
+        #ui-layer {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 10;
+            display: flex; flex-direction: column; justify-content: center; align-items: center;
+            background: rgba(0,0,0,0.85); pointer-events: auto; transition: opacity 0.5s;
         }
-        .btn {
-            background: rgba(0, 255, 255, 0.2); border: 1px solid #00ffff;
-            color: white; padding: 8px 15px; cursor: pointer; font-size: 14px;
-            border-radius: 5px; transition: 0.2s; font-family: inherit;
+        .panel { 
+            background: rgba(0, 20, 40, 0.9); border: 2px solid #00ffff; padding: 40px; 
+            border-radius: 15px; text-align: center; box-shadow: 0 0 30px rgba(0, 255, 255, 0.2);
+            max-width: 500px;
         }
-        .btn:hover { background: rgba(0, 255, 255, 0.5); }
-        .btn.active { background: #00ffff; color: black; font-weight: bold; }
+        h1 { margin: 0 0 20px 0; color: #00ffff; text-transform: uppercase; letter-spacing: 2px; }
+        p { color: #aaa; margin-bottom: 30px; font-size: 18px; }
+        .status { font-size: 20px; font-weight: bold; margin-bottom: 20px; min-height: 30px; color: #ffcc00; }
+        
+        button {
+            background: #00ffff; color: #000; border: none; padding: 15px 40px;
+            font-size: 20px; font-weight: bold; cursor: pointer; border-radius: 5px;
+            transition: 0.2s; text-transform: uppercase;
+        }
+        button:hover { background: #fff; box-shadow: 0 0 15px #00ffff; }
+        button:disabled { background: #555; color: #888; cursor: not-allowed; box-shadow: none; }
 
-        /* 風格選擇器樣式 */
-        select {
-            background: rgba(0, 0, 0, 0.8); color: #00ffff; border: 1px solid #00ffff;
-            padding: 8px; border-radius: 5px; font-family: inherit; cursor: pointer;
-        }
-
-        /* 受傷紅屏特效 */
-        #damage-overlay {
-            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-            background: red; opacity: 0; pointer-events: none; z-index: 4;
-            transition: opacity 0.1s;
-        }
-
-        h3 { margin-top: 0; color: #00ff00; font-size: 18px; }
-        .highlight { color: #ffff00; font-weight: bold; }
+        /* Settings */
+        #settings-panel { position: absolute; top: 280px; right: 20px; z-index: 5; display: flex; flex-direction: column; gap: 5px; }
+        .btn-sm { background: rgba(0,255,255,0.2); border: 1px solid #0ff; color: #fff; padding: 5px 10px; cursor: pointer; }
+        .btn-sm.active { background: #0ff; color: #000; }
+        
+        /* Damage Effect */
+        #damage-overlay { position: absolute; width: 100%; height: 100%; background: red; opacity: 0; pointer-events: none; z-index: 4; transition: opacity 0.1s; }
     </style>
 </head>
 <body>
 
 <div id="damage-overlay"></div>
-<div id="loading">系統啟動中...<br><span style="font-size:16px; color:#aaa;">Hands + Face Mesh</span></div>
 
-<div id="hp-display">❤️❤️❤️❤️❤️</div>
-
-<div id="game-message">
-    <h1 id="msg-title">GAME OVER</h1>
-    <button id="restart-btn" onclick="resetGame()">重新開始</button>
+<div id="ui-layer">
+    <div class="panel" id="lobby-panel">
+        <h1>Tank Battle Online</h1>
+        <p>手勢操控多人對戰系統</p>
+        <div class="status" id="lobby-status">準備就緒</div>
+        <button id="find-match-btn" onclick="findMatch()">尋找對戰</button>
+    </div>
+    <div class="panel" id="game-over-panel" style="display: none;">
+        <h1 id="end-title">GAME OVER</h1>
+        <p id="end-reason">...</p>
+        <button onclick="location.reload()">返回大廳</button>
+    </div>
 </div>
 
-<div id="instructions">
-    <h3>作戰簡報</h3>
-    <p>🎯 <span class="highlight">任務</span>：消滅 2 輛紅色敵軍</p>
-    <p>❤️ <span class="highlight">生存</span>：你有 5 點生命值</p>
-    <p>🖐️ 左手移動 | 右手瞄準+射擊</p>
-    <p>😎 頭部擺動控制視角</p>
+<div id="hp-bar">
+    <div>我方: <span id="my-hp">❤️❤️❤️❤️❤️</span></div>
+    <div style="font-size: 18px; color: #aaa; margin-top:5px;">敵方: <span id="enemy-hp">❤️❤️❤️❤️❤️</span></div>
 </div>
 
 <div id="settings-panel">
-    <button class="btn active" id="btn-mirror" onclick="toggleMirror()">鏡頭鏡像: 開</button>
-    <button class="btn" id="btn-invert" onclick="toggleInvert()">操控反向: 關</button>
-    
-    <!-- 風格選擇器 -->
-    <select id="style-select" onchange="changeVisualStyle(this.value)">
-        <option value="standard">🎨 風格: 標準戰場</option>
-        <option value="cyber">🌃 風格: 賽博龐克 (Neon)</option>
-        <option value="toon">🌈 風格: 卡通渲染 (Toon)</option>
+    <button class="btn-sm active" id="btn-mirror" onclick="toggleMirror()">鏡像: 開</button>
+    <button class="btn-sm" id="btn-invert" onclick="toggleInvert()">反向: 關</button>
+    <select class="btn-sm" onchange="changeStyle(this.value)" style="background: rgba(0,0,0,0.8);">
+        <option value="standard">風格: 標準</option>
+        <option value="cyber">風格: 賽博</option>
+        <option value="toon">風格: 卡通</option>
     </select>
 </div>
 
@@ -124,80 +86,546 @@
 <canvas id="output_canvas" width="640" height="480"></canvas>
 <div id="canvas-container"></div>
 
-<!-- Scripts: 使用鎖定版本的 MediaPipe 以確保穩定性 -->
+<!-- Libraries -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1675466862/camera_utils.js" crossorigin="anonymous"></script>
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils@0.6.1675466023/control_utils.js" crossorigin="anonymous"></script>
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.3.1675466124/drawing_utils.js" crossorigin="anonymous"></script>
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/hands.js" crossorigin="anonymous"></script>
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1673573359/face_mesh.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/holistic/holistic.js"></script>
 
-<script>
-    // --- 0. 全局設定 ---
-    const SMOOTH_FACTOR = 0.15;
-    const HEAD_SMOOTH = 0.1; 
-    const SENSITIVITY = 2.5;
-    const DEADZONE = 0.1;
-    const FIRE_COOLDOWN = 400; // 玩家射速
-    const ENEMY_FIRE_COOLDOWN = 2000; // 敵軍射速 (毫秒)
-    const PLAYER_MAX_HP = 5;
+<!-- Firebase Module -->
+<script type="module">
+    // 使用 CDN 導入 Firebase 模組，這是在瀏覽器中直接運行所必需的
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+    import { getAnalytics } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-analytics.js";
+    import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+    import { getFirestore, collection, doc, setDoc, updateDoc, onSnapshot, getDocs, deleteDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-    let isMirrored = true;
-    let isSteeringInverted = false;
-    let isGameOver = false;
-    let currentStyle = 'standard'; // 當前風格
+    // --- Firebase Setup (使用您提供的設定) ---
+    const firebaseConfig = {
+      apiKey: "AIzaSyAwgF1STeKUpjKU87cvS3cJqoHUp8mt_-8",
+      authDomain: "tank-94148.firebaseapp.com",
+      projectId: "tank-94148",
+      storageBucket: "tank-94148.firebasestorage.app",
+      messagingSenderId: "433724180176",
+      appId: "1:433724180176:web:008f2c3ebbea287aed00d5",
+      measurementId: "G-C2SGZJQKCY"
+    };
 
-    // 遊戲數據
-    let playerHP = PLAYER_MAX_HP;
-    const targetInput = { move: { x: 0, y: 0 }, aim: { x: 0, y: 0 }, head: { x: 0, y: 0 } };
-    const input = { move: { x: 0, y: 0 }, aim: { x: 0, y: 0 }, head: { x: 0, y: 0 } };
-    let lastFireTime = 0;
+    // Initialize Firebase
+    const app = initializeApp(firebaseConfig);
+    const analytics = getAnalytics(app); // 初始化 Analytics (選擇性)
+    const auth = getAuth(app);           // 遊戲核心：身份驗證
+    const db = getFirestore(app);        // 遊戲核心：即時資料庫
+    
+    // 使用您的 Project ID 作為 appId 前綴，確保資料路徑正確
+    const appId = 'tank-94148-game'; 
+    
+    let userId = null;
+    let matchId = null;
+    let myRole = null; // 'p1' (Host) or 'p2' (Client)
+    let unsubscribeMatch = null;
+    let lastNetworkUpdate = 0;
 
-    const JOYSTICK_LEFT = { x: 0.75, y: 0.6 }; 
-    const JOYSTICK_RIGHT = { x: 0.25, y: 0.6 };
+    // --- Game Logic Interface ---
+    window.findMatch = async function() {
+        const btn = document.getElementById('find-match-btn');
+        const status = document.getElementById('lobby-status');
+        btn.disabled = true;
+        status.innerText = "正在連線伺服器...";
 
-    // --- 風格定義 ---
-    const STYLES = {
-        standard: {
-            background: 0x1a1a1a,
-            fog: 0x1a1a1a,
-            ground: 0x333333,
-            player: 0x4B5320, // 軍綠
-            enemy: 0xAA3333,  // 紅
-            obstacle: 0x555555,
-            wireframe: false,
-            matType: 'MeshStandardMaterial'
-        },
-        cyber: {
-            background: 0x000000,
-            fog: 0x000000,
-            ground: 0x000000,
-            player: 0x00ff00, // 螢光綠
-            enemy: 0xff0000,  // 螢光紅
-            obstacle: 0x0000ff, // 螢光藍
-            wireframe: true,
-            matType: 'MeshBasicMaterial'
-        },
-        toon: {
-            background: 0x87CEEB, // 天空藍
-            fog: 0x87CEEB,
-            ground: 0x7CFC00,     // 草地綠
-            player: 0x228B22,     // 深綠
-            enemy: 0xFF4500,      // 橘紅
-            obstacle: 0x808080,   // 灰
-            wireframe: false,
-            matType: 'MeshToonMaterial'
+        try {
+            // 1. Auth
+            const userCredential = await signInAnonymously(auth);
+            userId = userCredential.user.uid;
+            status.innerText = "搜尋對戰中...";
+
+            // 2. Search for existing waiting rooms
+            // 修正路徑：使用您專案的集合結構
+            // 注意：請確保您的 Firestore 規則允許讀寫
+            const battlesRef = collection(db, 'matches'); 
+            const snapshot = await getDocs(battlesRef);
+            let foundRoom = null;
+
+            snapshot.forEach(doc => {
+                const data = doc.data();
+                const now = Date.now();
+                const created = data.createdAt ? data.createdAt.toMillis() : 0;
+                // 尋找 1 小時內建立且狀態為 waiting 的房間
+                if (data.status === 'waiting' && (now - created < 3600000) && !foundRoom) {
+                    foundRoom = doc.id;
+                }
+            });
+
+            if (foundRoom) {
+                // Join existing room
+                matchId = foundRoom;
+                myRole = 'p2';
+                status.innerText = "找到房間！正在加入...";
+                
+                const matchRef = doc(db, 'matches', matchId);
+                await updateDoc(matchRef, {
+                    status: 'playing',
+                    p2Id: userId,
+                    p2State: JSON.stringify(getInitialState()),
+                    updatedAt: serverTimestamp()
+                });
+                
+            } else {
+                // Create new room
+                myRole = 'p1';
+                status.innerText = "建立房間中，等待挑戰者...";
+                const newMatchRef = doc(collection(db, 'matches'));
+                matchId = newMatchRef.id;
+                
+                await setDoc(newMatchRef, {
+                    status: 'waiting',
+                    createdAt: serverTimestamp(),
+                    p1Id: userId,
+                    p1State: JSON.stringify(getInitialState()),
+                    p2State: JSON.stringify(getInitialState()),
+                    events: []
+                });
+            }
+
+            // 3. Start Listening
+            listenToMatch();
+
+        } catch (e) {
+            console.error("Matchmaking error:", e);
+            let msg = e.message;
+            if (e.code === 'auth/configuration-not-found' || e.code === 'auth/operation-not-allowed') {
+                msg = "請至 Firebase Console 開啟 Authentication > Sign-in method > 匿名登入 (Anonymous)";
+            }
+            status.innerText = "連線錯誤: " + msg;
+            btn.disabled = false;
         }
     };
 
-    // --- UI 與切換功能 ---
-    function updateHPDisplay() {
-        let hearts = "";
-        for(let i=0; i<playerHP; i++) hearts += "❤️";
-        document.getElementById('hp-display').innerText = hearts;
+    function listenToMatch() {
+        const matchRef = doc(db, 'matches', matchId);
+        const statusEl = document.getElementById('lobby-status');
+
+        unsubscribeMatch = onSnapshot(matchRef, (docSnap) => {
+            if (!docSnap.exists()) {
+                alert("房間已關閉");
+                location.reload();
+                return;
+            }
+
+            const data = docSnap.data();
+
+            if (myRole === 'p1' && data.status === 'waiting') {
+                statusEl.innerText = "等待對手加入...";
+            } else if (data.status === 'playing') {
+                // Start Game!
+                if (document.getElementById('ui-layer').style.display !== 'none') {
+                    startGame();
+                }
+                
+                // Sync remote player state
+                const remoteRole = myRole === 'p1' ? 'p2' : 'p1';
+                const remoteStateStr = data[remoteRole + 'State'];
+                if (remoteStateStr) {
+                    const rState = JSON.parse(remoteStateStr);
+                    updateRemoteTank(rState);
+                }
+            } else if (data.status === 'finished') {
+                endGame(data.winner === myRole);
+            }
+        });
     }
 
-    function showDamageEffect() {
-        const overlay = document.getElementById('damage-overlay');
-        overlay.style.opacity = 0.6;
-        setTimeout(() => { overlay
+    // --- Networking Functions called by Game Loop ---
+    window.sendGameState = async function(pos, rot, turretRot, barrelRot) {
+        if (!matchId || !userId) return;
+        
+        const now = Date.now();
+        if (now - lastNetworkUpdate < 100) return; // Limit to 10 updates/sec
+        lastNetworkUpdate = now;
+
+        const stateObj = {
+            x: pos.x, y: pos.y, z: pos.z,
+            ry: rot.y,
+            ty: turretRot.y,
+            bx: barrelRot.x,
+            hp: window.gameState.myHP
+        };
+
+        const updateData = {};
+        updateData[myRole + 'State'] = JSON.stringify(stateObj);
+        updateData['updatedAt'] = serverTimestamp();
+
+        try {
+            const matchRef = doc(db, 'matches', matchId);
+            await updateDoc(matchRef, updateData);
+        } catch (e) {
+            console.warn("Update failed", e);
+        }
+    };
+
+    window.sendFireEvent = async function() {
+        if (!matchId) return;
+        const matchRef = doc(db, 'matches', matchId);
+        const updateData = {};
+        updateData[`lastFire${myRole}`] = Date.now();
+        await updateDoc(matchRef, updateData);
+    };
+
+    window.sendHitEvent = async function() {
+        if (window.gameState.myHP <= 0) {
+            const matchRef = doc(db, 'matches', matchId);
+            await updateDoc(matchRef, {
+                status: 'finished',
+                winner: myRole === 'p1' ? 'p2' : 'p1' // Opponent wins
+            });
+        }
+    }
+
+    // Monitor fire events
+    let lastProcessedFireP1 = 0;
+    let lastProcessedFireP2 = 0;
+
+    onSnapshot(doc(db, 'matches', matchId || 'dummy'), (snap) => {
+        if(!snap.exists()) return;
+        const data = snap.data();
+        
+        const remoteRole = myRole === 'p1' ? 'p2' : 'p1';
+        const remoteFireKey = `lastFire${remoteRole}`;
+        const timestamp = data[remoteFireKey];
+
+        if (timestamp) {
+            let lastProcessed = remoteRole === 'p1' ? lastProcessedFireP1 : lastProcessedFireP2;
+            if (timestamp > lastProcessed) {
+                if (remoteRole === 'p1') lastProcessedFireP1 = timestamp;
+                else lastProcessedFireP2 = timestamp;
+                
+                if (window.gameState && window.gameState.running) {
+                    window.remoteFire();
+                }
+            }
+        }
+    });
+
+    function getInitialState() {
+        return { x: 0, y: 0, z: 0, ry: 0, ty: 0, bx: 0, hp: 5 };
+    }
+
+</script>
+
+<script>
+    // --- Global Game State & Config ---
+    const CONFIG = { smooth: 0.15, aimSmooth: 0.02, sensitivity: 2.5, deadzone: 0.1, fireCD: 500 }; 
+    const MAP_SIZE = 150; 
+    const BOUNDS = MAP_SIZE / 2 - 2;
+
+    window.gameState = { 
+        running: false, 
+        myHP: 5, 
+        enemyHP: 5, 
+        mirrored: true, 
+        inverted: false,
+        style: 'standard',
+        lastFire: 0
+    };
+
+    const input = { move: {x:0, y:0}, aim: {x:0, y:0}, head: {x:0} };
+    const target = { move: {x:0, y:0}, aim: {x:0, y:0}, head: {x:0} };
+    
+    // Three.js Vars
+    let scene, camera, renderer;
+    let myTank, myTurret, myBarrel;
+    let enemyTank, enemyTurret, enemyBarrel;
+    let bullets = [], obstacles = [];
+    const clock = new THREE.Clock();
+
+    // --- Initialization ---
+    function startGame() {
+        document.getElementById('ui-layer').style.display = 'none';
+        window.gameState.running = true;
+        
+        // P1 at +60Z, P2 at -60Z. But visual perspective handled by camera.
+    }
+
+    function initThree() {
+        const container = document.getElementById('canvas-container');
+        scene = new THREE.Scene(); scene.background = new THREE.Color(0x1a1a1a); scene.fog = new THREE.Fog(0x1a1a1a, 20, 150);
+        camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 0.1, 500);
+        camera.position.set(0, 20, -30);
+        
+        renderer = new THREE.WebGLRenderer({antialias:true}); renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        container.appendChild(renderer.domElement);
+
+        const light = new THREE.DirectionalLight(0xffeeb1, 1); light.position.set(20, 50, -20); light.castShadow = true;
+        light.shadow.mapSize.width = 2048; light.shadow.mapSize.height = 2048;
+        scene.add(light); scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+
+        // Environment
+        const plane = new THREE.Mesh(new THREE.PlaneGeometry(MAP_SIZE, MAP_SIZE), new THREE.MeshStandardMaterial({color:0x333333, roughness:0.8}));
+        plane.rotation.x = -Math.PI/2; plane.receiveShadow = true; plane.userData.type='ground'; scene.add(plane);
+        const grid = new THREE.GridHelper(MAP_SIZE, 40, 0x555555, 0x222222); scene.add(grid);
+        createWalls();
+
+        // Create Tanks
+        // My Tank (Green)
+        const p1 = createModel(0x4B5320, false);
+        myTank = p1.root; myTurret = p1.turret; myBarrel = p1.barrel;
+        myTank.position.set(0, 0, 60); 
+        myTank.rotation.y = Math.PI;
+        addLaser(myBarrel);
+        scene.add(myTank);
+
+        // Enemy Tank (Red)
+        const p2 = createModel(0xAA3333, true);
+        enemyTank = p2.root; enemyTurret = p2.turret; enemyBarrel = p2.barrel;
+        enemyTank.position.set(0, 0, -60);
+        scene.add(enemyTank);
+
+        changeStyle('standard');
+        
+        requestAnimationFrame(animate);
+    }
+
+    function createWalls() {
+        const h = 4; const geo = new THREE.BoxGeometry(MAP_SIZE, h, 2);
+        const mat = new THREE.MeshStandardMaterial({color: 0x00ffff, emissive: 0x004444, transparent: true, opacity: 0.5});
+        const pos = [[0, h/2, -MAP_SIZE/2], [0, h/2, MAP_SIZE/2], [-MAP_SIZE/2, h/2, 0, Math.PI/2], [MAP_SIZE/2, h/2, 0, Math.PI/2]];
+        pos.forEach(p => {
+            const w = new THREE.Mesh(geo, mat); w.position.set(p[0], p[1], p[2]); 
+            if(p[3]) w.rotation.y = p[3]; w.userData.type='wall'; scene.add(w);
+        });
+    }
+
+    function createModel(color, isEnemy) {
+        const root = new THREE.Group();
+        const bodyM = new THREE.MeshStandardMaterial({color:color});
+        const chassis = new THREE.Mesh(new THREE.BoxGeometry(4, 1.5, 6), bodyM);
+        chassis.position.y = 1.2; chassis.castShadow=true; chassis.userData.type=isEnemy?'eBody':'pBody'; root.add(chassis);
+        const tG = new THREE.Group(); tG.position.set(0, 2, 0); root.add(tG);
+        const tMesh = new THREE.Mesh(new THREE.BoxGeometry(3, 1.2, 3.5), bodyM);
+        tMesh.position.y = 0.6; tMesh.castShadow=true; tMesh.userData.type=isEnemy?'eTurret':'pTurret'; tG.add(tMesh);
+        const bG = new THREE.Group(); bG.position.set(0, 0.6, 1.5); tG.add(bG);
+        const bMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.25, 5, 16), bodyM);
+        bMesh.rotation.x = Math.PI/2; bMesh.position.z = 2.5; bMesh.castShadow=true; bMesh.userData.type=isEnemy?'eBarrel':'pBarrel'; bG.add(bMesh);
+        return { root, turret: tG, barrel: bG };
+    }
+
+    function addLaser(barrelObj) {
+        const laserGeo = new THREE.CylinderGeometry(0.05, 0.05, 100, 8);
+        laserGeo.rotateX(-Math.PI / 2); laserGeo.translate(0, 0, 50);
+        const laser = new THREE.Mesh(laserGeo, new THREE.MeshBasicMaterial({ color: 0xff0000, transparent: true, opacity: 0.3, blending: THREE.AdditiveBlending }));
+        laser.position.set(0, 0, 5); barrelObj.add(laser);
+    }
+
+    function shoot(origin, isEnemy) {
+        origin.updateMatrixWorld();
+        const muzzlePos = new THREE.Vector3(0, 0, 6).applyMatrix4(origin.matrixWorld);
+        const quat = new THREE.Quaternion(); origin.getWorldQuaternion(quat);
+        const dir = new THREE.Vector3(0, 0, 1).applyQuaternion(quat);
+
+        const bullet = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.4, 4, 8).rotateX(Math.PI/2), new THREE.MeshBasicMaterial({color: isEnemy?0xff3333:0xffff00}));
+        bullet.position.copy(muzzlePos); bullet.quaternion.copy(quat);
+        bullet.add(new THREE.PointLight(isEnemy?0xff3333:0xffff00, 1, 15));
+        bullet.userData = { vel: dir.multiplyScalar(70), life: 3, isEnemy };
+        scene.add(bullet); bullets.push(bullet);
+
+        const flash = new THREE.Mesh(new THREE.SphereGeometry(1.5,16,16), new THREE.MeshBasicMaterial({color: isEnemy?0xff8888:0xffffff, transparent:true, opacity:0.9}));
+        flash.position.copy(muzzlePos); scene.add(flash);
+        let s=1; const anim = ()=>{ s+=0.4; flash.scale.setScalar(s); flash.material.opacity-=0.15; if(flash.material.opacity>0)requestAnimationFrame(anim); else scene.remove(flash);}; anim();
+    }
+
+    window.remoteFire = function() {
+        if(enemyBarrel) {
+            enemyBarrel.position.z = 1.0;
+            shoot(enemyBarrel, true);
+        }
+    };
+
+    window.updateRemoteTank = function(stateData) {
+        if(!enemyTank) return;
+        const tPos = new THREE.Vector3(stateData.x, stateData.y, stateData.z);
+        enemyTank.position.lerp(tPos, 0.2);
+        
+        enemyTank.rotation.y = lerpAngle(enemyTank.rotation.y, stateData.ry, 0.2);
+        enemyTurret.rotation.y = lerpAngle(enemyTurret.rotation.y, stateData.ty, 0.2);
+        enemyBarrel.rotation.x = lerpAngle(enemyBarrel.rotation.x, stateData.bx, 0.2);
+
+        if(stateData.hp !== undefined) {
+            window.gameState.enemyHP = stateData.hp;
+            updateHPUI();
+        }
+    };
+
+    function lerpAngle(a, b, t) {
+        let diff = b - a;
+        while (diff > Math.PI) diff -= Math.PI * 2;
+        while (diff < -Math.PI) diff += Math.PI * 2;
+        return a + diff * t;
+    }
+
+    function animate() {
+        requestAnimationFrame(animate);
+        const dt = clock.getDelta();
+        if(!window.gameState.running) { renderer.render(scene, camera); return; }
+
+        input.move.x += (target.move.x - input.move.x) * CONFIG.moveSmooth;
+        input.move.y += (target.move.y - input.move.y) * CONFIG.moveSmooth;
+        input.aim.x += (target.aim.x - input.aim.x) * CONFIG.aimSmooth;
+        input.head.x += (target.head.x - input.head.x) * 0.1;
+
+        if(myTank) {
+            if(Math.abs(input.move.x)>0.01) myTank.rotation.y -= input.move.x*2*dt;
+            if(Math.abs(input.move.y)>0.01) myTank.translateZ(input.move.y*12*dt);
+            myTank.position.x = Math.max(-BOUNDS, Math.min(BOUNDS, myTank.position.x));
+            myTank.position.z = Math.max(-BOUNDS, Math.min(BOUNDS, myTank.position.z));
+
+            const aimSpeed = Math.sign(input.aim.x) * Math.pow(Math.abs(input.aim.x), 1.5) * 1.5;
+            myTurret.rotation.y -= aimSpeed * dt;
+            myBarrel.rotation.x = 0; 
+            
+            if(myBarrel.position.z < 1.5) myBarrel.position.z += 5*dt; else myBarrel.position.z = 1.5;
+            if(enemyBarrel && enemyBarrel.position.z < 1.5) enemyBarrel.position.z += 5*dt; else if(enemyBarrel) enemyBarrel.position.z = 1.5;
+
+            const camOffsetLocal = new THREE.Vector3(input.head.x * 5, 8, -25 - Math.abs(input.head.x));
+            const camTargetPos = camOffsetLocal.applyMatrix4(myTurret.matrixWorld);
+            camera.position.lerp(camTargetPos, 0.1);
+            const lookAtOffsetLocal = new THREE.Vector3(input.head.x * 2, 0, 50); 
+            const lookAtTargetPos = lookAtOffsetLocal.applyMatrix4(myTurret.matrixWorld);
+            camera.lookAt(lookAtTargetPos);
+
+            if(window.sendGameState) {
+                window.sendGameState(myTank.position, myTank.rotation, myTurret.rotation, myBarrel.rotation);
+            }
+        }
+
+        for(let i=bullets.length-1; i>=0; i--) {
+            const b = bullets[i];
+            b.position.add(b.userData.vel.clone().multiplyScalar(dt));
+            b.userData.life -= dt;
+            let hit = false;
+            if(b.userData.isEnemy) {
+                if(b.position.distanceTo(myTank.position) < 3.5) {
+                    hit = true; takeDamage(); createExplosion(b.position);
+                }
+            } else {
+                if(enemyTank && b.position.distanceTo(enemyTank.position) < 3.5) {
+                    hit = true; createExplosion(b.position);
+                }
+            }
+            if(hit || Math.abs(b.position.x)>BOUNDS || Math.abs(b.position.z)>BOUNDS || b.userData.life<=0) {
+                scene.remove(b); bullets.splice(i,1);
+            }
+        }
+        renderer.render(scene, camera);
+    }
+
+    function takeDamage() {
+        window.gameState.myHP--;
+        updateHPUI();
+        document.getElementById('damage-overlay').style.opacity = 0.5; 
+        setTimeout(()=>document.getElementById('damage-overlay').style.opacity=0, 200);
+        if(window.sendHitEvent) window.sendHitEvent();
+    }
+
+    function createExplosion(pos) {
+        const m = new THREE.Mesh(new THREE.SphereGeometry(2.5), new THREE.MeshBasicMaterial({color:0xffaa00, wireframe:window.gameState.style==='cyber'}));
+        m.position.copy(pos); scene.add(m);
+        let s=1; const anim = ()=>{ s+=0.3; m.scale.setScalar(s); m.material.opacity-=0.08; if(s<4)requestAnimationFrame(anim); else scene.remove(m); }; anim();
+    }
+
+    function endGame(win) {
+        window.gameState.running = false;
+        document.getElementById('ui-layer').style.display = 'flex';
+        document.getElementById('lobby-panel').style.display = 'none';
+        const p = document.getElementById('game-over-panel');
+        p.style.display = 'block';
+        document.getElementById('end-title').innerText = win ? "VICTORY" : "DEFEAT";
+        document.getElementById('end-title').style.color = win ? "#0f0" : "#f00";
+        document.getElementById('end-reason').innerText = win ? "敵艦擊沉！" : "機體全毀...";
+    }
+
+    function updateHPUI() {
+        document.getElementById('my-hp').innerText = "❤️".repeat(Math.max(0, window.gameState.myHP));
+        document.getElementById('enemy-hp').innerText = "❤️".repeat(Math.max(0, window.gameState.enemyHP));
+    }
+
+    window.changeStyle = function(s) {
+        window.gameState.style = s;
+        const colors = { standard: [0x1a1a1a, 0x4B5320, 0xAA3333], cyber: [0x000000, 0x00ff00, 0xff0000], toon: [0x87CEEB, 0x228B22, 0xFF4500] };
+        const c = colors[s];
+        scene.background = new THREE.Color(c[0]); scene.fog.color.setHex(c[0]);
+        scene.traverse(o => {
+            if(o.isMesh && o.userData.type) {
+                let col = 0x888888;
+                if(o.userData.type.includes('p')) col = c[1];
+                else if(o.userData.type.includes('e')) col = c[2];
+                else if(o.userData.type==='ground') col = s==='cyber'?0x000000:(s==='toon'?0x7CFC00:0x333333);
+                else if(o.userData.type==='wall') col = s==='cyber'?0x00ff00:0x00ffff;
+                o.material = s==='toon' ? new THREE.MeshToonMaterial({color:col}) : (s==='cyber'? new THREE.MeshBasicMaterial({color:col, wireframe:true}) : (o.userData.type==='wall'?o.material:new THREE.MeshStandardMaterial({color:col})));
+            }
+        });
+    }
+    window.toggleMirror = function() { window.gameState.mirrored=!window.gameState.mirrored; document.getElementById('btn-mirror').innerText = window.gameState.mirrored?"鏡像: 開":"鏡像: 關"; document.getElementById('output_canvas').style.transform = window.gameState.mirrored?"scaleX(-1)":"none"; document.getElementById('btn-mirror').classList.toggle('active'); }
+    window.toggleInvert = function() { window.gameState.inverted=!window.gameState.inverted; document.getElementById('btn-invert').innerText = window.gameState.inverted?"反向: 開":"反向: 關"; document.getElementById('btn-invert').classList.toggle('active'); }
+
+    initThree();
+
+    const canvas = document.getElementById('output_canvas'), ctx = canvas.getContext('2d');
+    const holistic = new Holistic({locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/holistic/${f}`});
+    holistic.setOptions({modelComplexity: 1, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5});
+    holistic.onResults(res => {
+        ctx.clearRect(0,0,640,480);
+        if(res.image) { ctx.globalAlpha=0.5; ctx.drawImage(res.image,0,0,640,480); ctx.globalAlpha=1; }
+        drawJoy(0.75, 0.6, "移動", target.move); drawJoy(0.25, 0.6, "瞄準", target.aim);
+        drawCooldown(0.25, 0.6, window.gameState.lastFire, CONFIG.fireCD);
+
+        if(res.leftHandLandmarks) {
+            drawHand(res.leftHandLandmarks);
+            let dx = (res.leftHandLandmarks[9].x - 0.75)*-2.5, dy = (res.leftHandLandmarks[9].y - 0.6)*-2.5;
+            if(window.gameState.inverted) dx *= -1;
+            target.move = { x: clamp(dx), y: clamp(dy) };
+            drawJoyStick(0.75, 0.6, target.move.x, target.move.y, true);
+        } else target.move = {x:0, y:0};
+        
+        if(res.rightHandLandmarks) {
+            drawHand(res.rightHandLandmarks);
+            target.aim = { x: clamp((res.rightHandLandmarks[9].x - 0.25)*-2.5), y: 0 };
+            const pinch = Math.hypot(res.rightHandLandmarks[4].x - res.rightHandLandmarks[6].x, res.rightHandLandmarks[4].y - res.rightHandLandmarks[6].y) < 0.05;
+            const now = Date.now();
+            if(pinch && now - window.gameState.lastFire > CONFIG.fireCD && window.gameState.running) { 
+                window.gameState.lastFire = now; 
+                if(myBarrel) myBarrel.position.z = 1.0; 
+                shoot(myBarrel, false); 
+                if(window.sendFireEvent) window.sendFireEvent();
+            }
+            drawJoyStick(0.25, 0.6, target.aim.x, target.aim.y, pinch);
+        } else target.aim = {x:0, y:0};
+        
+        target.head.x = res.faceLandmarks ? (res.faceLandmarks[1].x - 0.5)*(window.gameState.mirrored?-3:3) : 0;
+    });
+
+    const cam = new Camera(document.querySelector('.input_video'), { onFrame: async()=>{ await holistic.send({image:document.querySelector('.input_video')})}, width:640, height:480 });
+    cam.start();
+
+    function clamp(v) { return Math.max(-1, Math.min(1, Math.abs(v)<CONFIG.deadzone ? 0 : (v>0?v-CONFIG.deadzone:v+CONFIG.deadzone)/(1-CONFIG.deadzone))); }
+    function drawJoy(nx, ny, txt) { 
+        const x=nx*640, y=ny*480; 
+        ctx.beginPath(); ctx.arc(x,y,40,0,7); ctx.strokeStyle="#fff5"; ctx.stroke();
+        ctx.fillStyle="#0ff"; ctx.font="16px Arial"; ctx.textAlign="center"; 
+        ctx.save(); ctx.translate(x,y); if(window.gameState.mirrored) ctx.scale(-1,1); ctx.fillText(txt,0,60); ctx.restore();
+    }
+    function drawCooldown(nx, ny, last, cd) {
+        const x=nx*640, y=ny*480; const progress = Math.min(1, (Date.now() - last) / cd);
+        if(progress < 1) { ctx.beginPath(); ctx.arc(x, y, 50, -Math.PI/2, -Math.PI/2 + Math.PI*2*progress); ctx.strokeStyle = "#ff0000"; ctx.lineWidth = 5; ctx.stroke(); } 
+        else { ctx.beginPath(); ctx.arc(x, y, 50, 0, Math.PI*2); ctx.strokeStyle = "#00ff00"; ctx.lineWidth = 2; ctx.stroke(); }
+    }
+    function drawJoyStick(nx, ny, dx, dy, act) {
+        const cx=nx*640, cy=ny*480, tx=cx-dx*40, ty=cy-dy*40;
+        ctx.beginPath(); ctx.moveTo(cx,cy); ctx.lineTo(tx,ty); ctx.strokeStyle=act?"#f00":"#0f0"; ctx.lineWidth=3; ctx.stroke();
+        ctx.beginPath(); ctx.arc(tx,ty,10,0,7); ctx.fillStyle=act?"#f00":"#0f0"; ctx.fill();
+    }
+    function drawHand(lm) { drawConnectors(ctx, lm, HAND_CONNECTIONS, {color:'#0f0', lineWidth:1}); drawLandmarks(ctx, lm, {color:'#f00', radius:2}); }
+</script>
+</body>
+</html>
