@@ -3,417 +3,201 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Three.js 手勢控制坦克 (MediaPipe)</title>
+    <title>Three.js 坦克大戰 (PvE 模式)</title>
     <style>
-        body {
-            margin: 0;
-            overflow: hidden;
-            background-color: #87CEEB;
-            font-family: Arial, sans-serif;
-        }
-        #canvas-container {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100vh;
-            z-index: 1;
-        }
+        body { margin: 0; overflow: hidden; background-color: #1a1a1a; font-family: "Microsoft JhengHei", Arial, sans-serif; user-select: none; }
         
-        /* 視訊預覽視窗 */
-        .input_video {
-            display: none; /* 隱藏原始 video 元素，我們畫在 canvas 上 */
-        }
+        #canvas-container { position: absolute; top: 0; left: 0; width: 100%; height: 100vh; z-index: 1; }
+        .input_video { display: none; }
+        
+        /* 2D HUD 畫布 */
         #output_canvas {
-            position: absolute;
-            top: 20px;
-            right: 20px;
-            width: 320px;
-            height: 240px;
+            position: absolute; top: 20px; right: 20px;
+            width: 320px; height: 240px;
             z-index: 2;
-            border: 3px solid rgba(255, 255, 255, 0.5);
+            border: 2px solid rgba(0, 255, 255, 0.3);
             border-radius: 10px;
-            background: rgba(0, 0, 0, 0.5);
-            transform: scaleX(-1); /* 鏡像翻轉，讓操作更直觀 */
+            background: rgba(0, 0, 0, 0.6);
+            transform: scaleX(-1); 
+            transition: transform 0.3s ease;
         }
 
+        /* UI 元素 */
+        #hp-display {
+            position: absolute; top: 20px; left: 20px; z-index: 5;
+            font-size: 32px; color: #ff3333; text-shadow: 2px 2px 0 #000;
+        }
+
+        #game-message {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            z-index: 20; color: white; text-align: center;
+            display: none; /* 預設隱藏 */
+            background: rgba(0, 0, 0, 0.85);
+            padding: 40px; border-radius: 20px; border: 2px solid #fff;
+        }
+        #game-message h1 { font-size: 48px; margin: 0 0 20px 0; }
+        #restart-btn {
+            background: #ff3333; color: white; border: none; padding: 15px 30px;
+            font-size: 24px; cursor: pointer; border-radius: 10px; font-family: inherit;
+        }
+        #restart-btn:hover { background: #ff6666; }
+
         #loading {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            z-index: 10;
-            color: white;
-            font-size: 24px;
-            background: rgba(0,0,0,0.7);
-            padding: 20px;
-            border-radius: 10px;
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            z-index: 10; color: #00ffff; font-size: 24px; font-weight: bold;
+            background: rgba(0,0,0,0.8); padding: 30px; border-radius: 15px;
+            border: 1px solid #00ffff;
+            box-shadow: 0 0 20px rgba(0, 255, 255, 0.2);
+            text-align: center;
         }
 
         #instructions {
-            position: absolute;
-            top: 20px;
-            left: 20px;
-            z-index: 2;
-            color: white;
-            background: rgba(0,0,0,0.6);
-            padding: 15px;
-            border-radius: 8px;
-            pointer-events: none;
+            position: absolute; bottom: 20px; left: 20px; z-index: 2;
+            color: white; background: rgba(0,0,0,0.5); padding: 15px;
+            border-radius: 8px; pointer-events: none;
+            border-left: 4px solid #00ff00;
+            width: 250px;
         }
+        
+        #settings-panel {
+            position: absolute; top: 280px; right: 20px; z-index: 5;
+            display: flex; flex-direction: column; gap: 10px;
+        }
+        .btn {
+            background: rgba(0, 255, 255, 0.2); border: 1px solid #00ffff;
+            color: white; padding: 8px 15px; cursor: pointer; font-size: 14px;
+            border-radius: 5px; transition: 0.2s; font-family: inherit;
+        }
+        .btn:hover { background: rgba(0, 255, 255, 0.5); }
+        .btn.active { background: #00ffff; color: black; font-weight: bold; }
+
+        /* 風格選擇器樣式 */
+        select {
+            background: rgba(0, 0, 0, 0.8); color: #00ffff; border: 1px solid #00ffff;
+            padding: 8px; border-radius: 5px; font-family: inherit; cursor: pointer;
+        }
+
+        /* 受傷紅屏特效 */
+        #damage-overlay {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: red; opacity: 0; pointer-events: none; z-index: 4;
+            transition: opacity 0.1s;
+        }
+
+        h3 { margin-top: 0; color: #00ff00; font-size: 18px; }
         .highlight { color: #ffff00; font-weight: bold; }
     </style>
 </head>
 <body>
 
-    <div id="loading">正在啟動攝影機與 AI 模型...</div>
+<div id="damage-overlay"></div>
+<div id="loading">系統啟動中...<br><span style="font-size:16px; color:#aaa;">Hands + Face Mesh</span></div>
 
-    <div id="instructions">
-        <h3>手勢操作說明</h3>
-        <p><span class="highlight">左手</span>：控制移動 (前後左右)</p>
-        <p><span class="highlight">右手</span>：控制瞄準 (砲塔/砲管)</p>
-        <p><span class="highlight">右手捏合 (食指+拇指)</span>：發射砲彈</p>
-        <p>請保持手掌在畫面內，距離鏡頭約 50cm</p>
-    </div>
+<div id="hp-display">❤️❤️❤️❤️❤️</div>
 
-    <!-- MediaPipe 視訊與繪圖區 -->
-    <video class="input_video"></video>
-    <canvas id="output_canvas" width="640" height="480"></canvas>
+<div id="game-message">
+    <h1 id="msg-title">GAME OVER</h1>
+    <button id="restart-btn" onclick="resetGame()">重新開始</button>
+</div>
 
-    <!-- Three.js 畫布 -->
-    <div id="canvas-container"></div>
+<div id="instructions">
+    <h3>作戰簡報</h3>
+    <p>🎯 <span class="highlight">任務</span>：消滅 2 輛紅色敵軍</p>
+    <p>❤️ <span class="highlight">生存</span>：你有 5 點生命值</p>
+    <p>🖐️ 左手移動 | 右手瞄準+射擊</p>
+    <p>😎 頭部擺動控制視角</p>
+</div>
 
-    <!-- 引入 Three.js -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <!-- 引入 MediaPipe Hands -->
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+<div id="settings-panel">
+    <button class="btn active" id="btn-mirror" onclick="toggleMirror()">鏡頭鏡像: 開</button>
+    <button class="btn" id="btn-invert" onclick="toggleInvert()">操控反向: 關</button>
+    
+    <!-- 風格選擇器 -->
+    <select id="style-select" onchange="changeVisualStyle(this.value)">
+        <option value="standard">🎨 風格: 標準戰場</option>
+        <option value="cyber">🌃 風格: 賽博龐克 (Neon)</option>
+        <option value="toon">🌈 風格: 卡通渲染 (Toon)</option>
+    </select>
+</div>
 
-    <script>
-        // --- 1. Three.js 全局變量 (與之前相同) ---
-        let scene, camera, renderer;
-        let tankBody, turret, barrel;
-        let bullets = [];
-        const clock = new THREE.Clock();
+<video class="input_video"></video>
+<canvas id="output_canvas" width="640" height="480"></canvas>
+<div id="canvas-container"></div>
 
-        // 輸入狀態 (將由手勢更新)
-        const input = {
-            move: { x: 0, y: 0 }, 
-            aim: { x: 0, y: 0 }
-        };
-        let isFiring = false;
-        let lastFireTime = 0;
+<!-- Scripts: 使用鎖定版本的 MediaPipe 以確保穩定性 -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1675466862/camera_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils@0.6.1675466023/control_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.3.1675466124/drawing_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/hands.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1673573359/face_mesh.js" crossorigin="anonymous"></script>
 
-        // 坦克參數
-        const tankSpeed = 10;
-        const turnSpeed = 2.0;
-        const turretSpeed = 2.0;
+<script>
+    // --- 0. 全局設定 ---
+    const SMOOTH_FACTOR = 0.15;
+    const HEAD_SMOOTH = 0.1; 
+    const SENSITIVITY = 2.5;
+    const DEADZONE = 0.1;
+    const FIRE_COOLDOWN = 400; // 玩家射速
+    const ENEMY_FIRE_COOLDOWN = 2000; // 敵軍射速 (毫秒)
+    const PLAYER_MAX_HP = 5;
 
-        // --- 2. MediaPipe 初始化 ---
-        const videoElement = document.getElementsByClassName('input_video')[0];
-        const canvasElement = document.getElementById('output_canvas');
-        const canvasCtx = canvasElement.getContext('2d');
-        
-        // 參考點 (用於計算手勢偏移量)
-        // 我們假設畫面中心點 (0.5, 0.5) 是 "停止" 的位置
-        const neutralZone = { x: 0.5, y: 0.5 };
-        const sensitivity = 2.5; // 靈敏度，數值越大手需要移動的距離越短
+    let isMirrored = true;
+    let isSteeringInverted = false;
+    let isGameOver = false;
+    let currentStyle = 'standard'; // 當前風格
 
-        function onResults(results) {
-            // 隱藏 Loading
-            document.getElementById('loading').style.display = 'none';
+    // 遊戲數據
+    let playerHP = PLAYER_MAX_HP;
+    const targetInput = { move: { x: 0, y: 0 }, aim: { x: 0, y: 0 }, head: { x: 0, y: 0 } };
+    const input = { move: { x: 0, y: 0 }, aim: { x: 0, y: 0 }, head: { x: 0, y: 0 } };
+    let lastFireTime = 0;
 
-            // 清空並繪製攝影機畫面
-            canvasCtx.save();
-            canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
-            canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+    const JOYSTICK_LEFT = { x: 0.75, y: 0.6 }; 
+    const JOYSTICK_RIGHT = { x: 0.25, y: 0.6 };
 
-            // 重置輸入 (如果手離開畫面，坦克應該停止)
-            input.move.x = 0;
-            input.move.y = 0;
-            input.aim.x = 0;
-            input.aim.y = 0;
-
-            if (results.multiHandLandmarks) {
-                for (let i = 0; i < results.multiHandLandmarks.length; i++) {
-                    const landmarks = results.multiHandLandmarks[i];
-                    const classification = results.multiHandedness[i];
-                    
-                    // 繪製骨架
-                    drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, {color: '#00FF00', lineWidth: 5});
-                    drawLandmarks(canvasCtx, landmarks, {color: '#FF0000', lineWidth: 2});
-
-                    // 判斷左右手
-                    // 注意：MediaPipe 的 label 是基於"人"的視角。
-                    // 在自拍鏡頭模式下，如果沒有鏡像翻轉，"Left" label 實際上顯示在畫面的右邊。
-                    // 我們這裡簡單處理：根據手在畫面上的 x 座標來決定功能。
-                    // 畫面左半邊 (x > 0.5 因為我們 CSS 做了 scaleX(-1)) 控制移動，右半邊控制瞄準。
-                    
-                    // 獲取手掌中心 (Landmark 9: Middle Finger MCP 是一個穩定的中心點)
-                    const handX = landmarks[9].x;
-                    const handY = landmarks[9].y;
-
-                    // 計算相對於中心點的偏移 (-0.5 ~ 0.5)
-                    // 這裡需要注意：因為我們在 CSS 翻轉了 Canvas (鏡像)，
-                    // 但 JS 裡的座標 data 還是原始的 (左上 0,0)。
-                    // 為了讓操作直覺 (手往左移，坦克往左)，我們需要根據實際感受調整。
-                    
-                    // 邏輯分區：
-                    // 如果手在畫面左側 (原始數據 x < 0.5) -> 這是使用者的右手 (因為鏡像) -> 瞄準
-                    // 如果手在畫面右側 (原始數據 x > 0.5) -> 這是使用者的左手 -> 移動
-                    
-                    // 但 MediaPipe 的 label 通常很準確：
-                    const label = classification.label; // 'Left' or 'Right'
-
-                    if (label === 'Left') {
-                        // --- 左手：控制移動 ---
-                        // 計算偏移量 (X軸反轉，因為鏡頭鏡像)
-                        // 原始 X: 0(左) -> 1(右)。手往左移(數值變小)，坦克應該左轉。
-                        // 我們設定一個虛擬中心點，例如 x=0.75 (畫面右側中心)
-                        let dx = (handX - 0.75) * sensitivity * -1; // 反轉 X
-                        let dy = (handY - 0.5) * sensitivity * -1; // 反轉 Y (向上是負數，我們希望向上是前進(+))
-
-                        // 死區 (Deadzone) 防止抖動
-                        if (Math.abs(dx) < 0.1) dx = 0;
-                        if (Math.abs(dy) < 0.1) dy = 0;
-
-                        // 限制在 -1 到 1
-                        input.move.x = Math.max(-1, Math.min(1, dx));
-                        input.move.y = Math.max(-1, Math.min(1, dy));
-
-                        // 視覺反饋：畫出中心點
-                        drawVirtualJoystick(canvasCtx, 0.75 * canvasElement.width, 0.5 * canvasElement.height, dx, dy);
-
-                    } else {
-                        // --- 右手：控制瞄準 ---
-                        // 虛擬中心點 x=0.25
-                        let dx = (handX - 0.25) * sensitivity * -1;
-                        let dy = (handY - 0.5) * sensitivity * -1;
-
-                        if (Math.abs(dx) < 0.1) dx = 0;
-                        if (Math.abs(dy) < 0.1) dy = 0;
-
-                        input.aim.x = Math.max(-1, Math.min(1, dx));
-                        input.aim.y = Math.max(-1, Math.min(1, dy));
-
-                        drawVirtualJoystick(canvasCtx, 0.25 * canvasElement.width, 0.5 * canvasElement.height, dx, dy);
-
-                        // --- 射擊檢測 (捏合) ---
-                        // 計算食指指尖 (8) 和拇指指尖 (4) 的距離
-                        const thumbTip = landmarks[4];
-                        const indexTip = landmarks[8];
-                        const distance = Math.sqrt(
-                            Math.pow(thumbTip.x - indexTip.x, 2) + 
-                            Math.pow(thumbTip.y - indexTip.y, 2)
-                        );
-
-                        // 距離閾值 (視距離而定，通常 < 0.05 算捏合)
-                        if (distance < 0.05) {
-                            const now = Date.now();
-                            if (now - lastFireTime > 500) { // 0.5秒冷卻
-                                fireBullet();
-                                lastFireTime = now;
-                                // 視覺提示：畫一個黃色圈圈
-                                canvasCtx.beginPath();
-                                canvasCtx.arc(indexTip.x * canvasElement.width, indexTip.y * canvasElement.height, 20, 0, 2 * Math.PI);
-                                canvasCtx.fillStyle = "yellow";
-                                canvasCtx.fill();
-                            }
-                        }
-                    }
-                }
-            }
-            canvasCtx.restore();
+    // --- 風格定義 ---
+    const STYLES = {
+        standard: {
+            background: 0x1a1a1a,
+            fog: 0x1a1a1a,
+            ground: 0x333333,
+            player: 0x4B5320, // 軍綠
+            enemy: 0xAA3333,  // 紅
+            obstacle: 0x555555,
+            wireframe: false,
+            matType: 'MeshStandardMaterial'
+        },
+        cyber: {
+            background: 0x000000,
+            fog: 0x000000,
+            ground: 0x000000,
+            player: 0x00ff00, // 螢光綠
+            enemy: 0xff0000,  // 螢光紅
+            obstacle: 0x0000ff, // 螢光藍
+            wireframe: true,
+            matType: 'MeshBasicMaterial'
+        },
+        toon: {
+            background: 0x87CEEB, // 天空藍
+            fog: 0x87CEEB,
+            ground: 0x7CFC00,     // 草地綠
+            player: 0x228B22,     // 深綠
+            enemy: 0xFF4500,      // 橘紅
+            obstacle: 0x808080,   // 灰
+            wireframe: false,
+            matType: 'MeshToonMaterial'
         }
+    };
 
-        function drawVirtualJoystick(ctx, centerX, centerY, valX, valY) {
-            ctx.beginPath();
-            ctx.strokeStyle = "rgba(255, 255, 255, 0.5)";
-            ctx.lineWidth = 2;
-            ctx.arc(centerX, centerY, 40, 0, 2 * Math.PI); // 底座
-            ctx.stroke();
+    // --- UI 與切換功能 ---
+    function updateHPDisplay() {
+        let hearts = "";
+        for(let i=0; i<playerHP; i++) hearts += "❤️";
+        document.getElementById('hp-display').innerText = hearts;
+    }
 
-            // 搖桿頭
-            const maxDist = 40;
-            const posX = centerX + valX * maxDist * -1; // 視覺修正
-            const posY = centerY + valY * maxDist * -1; // 視覺修正 (Y軸向下為正)
-
-            ctx.beginPath();
-            ctx.fillStyle = "rgba(0, 255, 0, 0.8)";
-            ctx.arc(posX, posY, 10, 0, 2 * Math.PI);
-            ctx.fill();
-        }
-
-        const hands = new Hands({locateFile: (file) => {
-            return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
-        }});
-        hands.setOptions({
-            maxNumHands: 2,
-            modelComplexity: 1,
-            minDetectionConfidence: 0.5,
-            minTrackingConfidence: 0.5
-        });
-        hands.onResults(onResults);
-
-        const cameraUtils = new Camera(videoElement, {
-            onFrame: async () => {
-                await hands.send({image: videoElement});
-            },
-            width: 640,
-            height: 480
-        });
-        cameraUtils.start();
-
-
-        // --- 3. Three.js 邏輯 (初始化與渲染) ---
-        init();
-        animate();
-
-        function init() {
-            const container = document.getElementById('canvas-container');
-            scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x87CEEB);
-            scene.fog = new THREE.Fog(0x87CEEB, 20, 100);
-
-            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 500);
-            camera.position.set(0, 15, -20);
-            camera.lookAt(0, 0, 0);
-
-            renderer = new THREE.WebGLRenderer({ antialias: true });
-            renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.shadowMap.enabled = true;
-            container.appendChild(renderer.domElement);
-
-            // 燈光
-            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
-            scene.add(ambientLight);
-            const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
-            dirLight.position.set(50, 50, -50);
-            dirLight.castShadow = true;
-            scene.add(dirLight);
-
-            // 地面
-            const planeGeometry = new THREE.PlaneGeometry(200, 200);
-            const planeMaterial = new THREE.MeshLambertMaterial({ color: 0x3a9d23 });
-            const plane = new THREE.Mesh(planeGeometry, planeMaterial);
-            plane.rotation.x = -Math.PI / 2;
-            plane.receiveShadow = true;
-            scene.add(plane);
-            scene.add(new THREE.GridHelper(200, 50));
-
-            createTank();
-
-            window.addEventListener('resize', onWindowResize, false);
-        }
-
-        function createTank() {
-            tankBody = new THREE.Group();
-            scene.add(tankBody);
-
-            const greenMat = new THREE.MeshPhongMaterial({ color: 0x2E8B57 });
-            const darkMat = new THREE.MeshPhongMaterial({ color: 0x1a1a1a });
-            
-            // 車身
-            const chassis = new THREE.Mesh(new THREE.BoxGeometry(4, 1.5, 6), greenMat);
-            chassis.position.y = 1.2;
-            chassis.castShadow = true;
-            tankBody.add(chassis);
-
-            // 履帶
-            const treadL = new THREE.Mesh(new THREE.BoxGeometry(1, 1.5, 6.5), darkMat);
-            treadL.position.set(-2.2, 0.75, 0);
-            treadL.castShadow = true;
-            tankBody.add(treadL);
-            const treadR = treadL.clone();
-            treadR.position.set(2.2, 0.75, 0);
-            tankBody.add(treadR);
-
-            // 砲塔
-            turret = new THREE.Group();
-            turret.position.set(0, 2, 0);
-            tankBody.add(turret);
-            const turretMesh = new THREE.Mesh(new THREE.BoxGeometry(3, 1.2, 3.5), greenMat);
-            turretMesh.castShadow = true;
-            turret.add(turretMesh);
-
-            // 砲管
-            barrel = new THREE.Group();
-            barrel.position.set(0, 0, 1.5);
-            turret.add(barrel);
-            const barrelMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 5, 16), darkMat);
-            barrelMesh.rotation.x = Math.PI / 2;
-            barrelMesh.position.z = 2.5;
-            barrelMesh.castShadow = true;
-            barrel.add(barrelMesh);
-        }
-
-        function fireBullet() {
-            if (!barrel) return;
-            const bullet = new THREE.Mesh(new THREE.SphereGeometry(0.3), new THREE.MeshBasicMaterial({ color: 0xffff00 }));
-            
-            const vector = new THREE.Vector3(0, 0, 5);
-            vector.applyMatrix4(barrel.matrixWorld);
-            bullet.position.copy(vector);
-
-            const direction = new THREE.Vector3(0, 0, 1);
-            direction.applyQuaternion(barrel.getWorldQuaternion(new THREE.Quaternion()));
-            
-            bullet.userData.velocity = direction.multiplyScalar(30);
-            bullet.userData.life = 2.0;
-
-            scene.add(bullet);
-            bullets.push(bullet);
-        }
-
-        function onWindowResize() {
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
-        }
-
-        function updateTank(dt) {
-            if (!tankBody) return;
-
-            // 移動
-            if (Math.abs(input.move.x) > 0.05) tankBody.rotation.y -= input.move.x * turnSpeed * dt;
-            if (Math.abs(input.move.y) > 0.05) tankBody.translateZ(input.move.y * tankSpeed * dt);
-
-            // 瞄準
-            if (Math.abs(input.aim.x) > 0.05) turret.rotation.y -= input.aim.x * turretSpeed * dt;
-            if (Math.abs(input.aim.y) > 0.05) {
-                barrel.rotation.x += input.aim.y * turretSpeed * dt;
-                barrel.rotation.x = Math.max(-0.2, Math.min(Math.PI / 4, barrel.rotation.x));
-            }
-
-            // 相機跟隨
-            const relativeCameraOffset = new THREE.Vector3(0, 10, -15);
-            const cameraOffset = relativeCameraOffset.applyMatrix4(tankBody.matrixWorld);
-            camera.position.lerp(cameraOffset, 0.1);
-            camera.lookAt(tankBody.position);
-        }
-
-        function updateBullets(dt) {
-            for (let i = bullets.length - 1; i >= 0; i--) {
-                const b = bullets[i];
-                b.position.add(b.userData.velocity.clone().multiplyScalar(dt));
-                b.userData.velocity.y -= 9.8 * dt;
-                b.userData.life -= dt;
-                if (b.position.y < 0 || b.userData.life <= 0) {
-                    scene.remove(b);
-                    bullets.splice(i, 1);
-                }
-            }
-        }
-
-        function animate() {
-            requestAnimationFrame(animate);
-            const dt = clock.getDelta();
-            updateTank(dt);
-            updateBullets(dt);
-            renderer.render(scene, camera);
-        }
-    </script>
-</body>
-</html>
+    function showDamageEffect() {
+        const overlay = document.getElementById('damage-overlay');
+        overlay.style.opacity = 0.6;
+        setTimeout(() => { overlay
