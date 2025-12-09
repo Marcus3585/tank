@@ -3,20 +3,18 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Three.js 坦克 Online (角色修復版)</title>
+    <title>Three.js 坦克 Online (雙重偵測版)</title>
     <style>
         body { margin: 0; overflow: hidden; background: #050505; font-family: "Segoe UI", sans-serif; user-select: none; color: white; }
         #canvas-container { position: absolute; width: 100%; height: 100vh; z-index: 1; }
         .input_video { display: none; }
         
-        /* HUD */
         #output_canvas { 
             position: absolute; top: 20px; right: 20px; width: 320px; height: 240px; 
             z-index: 2; border: 2px solid #00ffff; border-radius: 10px; background: rgba(0,0,0,0.6); transform: scaleX(-1); 
         }
         #hp-bar { position: absolute; top: 20px; left: 20px; z-index: 5; font-size: 24px; text-shadow: 2px 2px 0 #000; }
         
-        /* UI Overlay */
         #ui-layer {
             position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 10;
             display: flex; flex-direction: column; justify-content: center; align-items: center;
@@ -39,23 +37,24 @@
         button:hover { background: #fff; box-shadow: 0 0 15px #00ffff; }
         button:disabled { background: #555; color: #888; cursor: not-allowed; box-shadow: none; }
 
-        /* Settings */
         #settings-panel { position: absolute; top: 280px; right: 20px; z-index: 5; display: flex; flex-direction: column; gap: 5px; }
         .btn-sm { background: rgba(0,255,255,0.2); border: 1px solid #0ff; color: #fff; padding: 5px 10px; cursor: pointer; }
         .btn-sm.active { background: #0ff; color: #000; }
         
         #damage-overlay { position: absolute; width: 100%; height: 100%; background: red; opacity: 0; pointer-events: none; z-index: 4; transition: opacity 0.1s; }
+        #debug-info { position: absolute; bottom: 10px; right: 20px; color: #00ff00; font-family: monospace; font-size: 12px; z-index: 5; text-align: right; }
     </style>
 </head>
 <body>
 
 <div id="damage-overlay"></div>
+<div id="debug-info">系統初始化中...</div>
 
 <div id="ui-layer">
     <div class="panel" id="lobby-panel">
         <h1>Tank Battle Online</h1>
         <p>手勢操控多人對戰系統</p>
-        <div class="status" id="lobby-status">準備就緒</div>
+        <div class="status" id="lobby-status">初始化中...</div>
         <button id="find-match-btn" onclick="findMatch()">尋找對戰</button>
     </div>
     <div class="panel" id="game-over-panel" style="display: none;">
@@ -85,18 +84,26 @@
 <canvas id="output_canvas" width="640" height="480"></canvas>
 <div id="canvas-container"></div>
 
-<!-- Libraries -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/holistic/holistic.js"></script>
 
-<!-- Firebase Module -->
+<script>
+    window.findMatch = function() { alert("系統載入中，請稍候..."); };
+    window.gameInterface = {
+        onGameStart: (role) => console.log("Waiting...", role),
+        onRemoteUpdate: (state) => {},
+        onRemoteFire: () => {},
+        onGameOver: (win) => {}
+    };
+</script>
+
 <script type="module">
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-    import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-    import { getFirestore, collection, doc, setDoc, updateDoc, onSnapshot, getDocs, deleteDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+    import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+    import { getFirestore, collection, doc, setDoc, updateDoc, onSnapshot, getDocs, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
     const firebaseConfig = {
       apiKey: "AIzaSyAwgF1STeKUpjKU87cvS3cJqoHUp8mt_-8",
@@ -108,15 +115,19 @@
       measurementId: "G-C2SGZJQKCY"
     };
 
-    const app = initializeApp(firebaseConfig);
-    const auth = getAuth(app);
-    const db = getFirestore(app);
-    const appId = 'tank-94148-game'; 
-    
+    let app, auth, db;
+    try {
+        app = initializeApp(firebaseConfig);
+        auth = getAuth(app);
+        db = getFirestore(app);
+        document.getElementById('lobby-status').innerText = "連線成功，請開始對戰";
+    } catch (e) {
+        document.getElementById('lobby-status').innerText = "系統錯誤: " + e.message;
+    }
+
     let userId = null;
     let matchId = null;
     let myRole = null; 
-    let unsubscribeMatch = null;
     let lastNetworkUpdate = 0;
 
     window.findMatch = async function() {
@@ -147,39 +158,33 @@
                 matchId = foundRoom;
                 myRole = 'p2';
                 status.innerText = "找到房間！正在加入...";
-                
                 const matchRef = doc(db, 'matches', matchId);
                 await updateDoc(matchRef, {
                     status: 'playing',
                     p2Id: userId,
-                    p2State: JSON.stringify(getInitialState()),
+                    p2State: JSON.stringify({x:0,y:0,z:0,ry:0,ty:0,bx:0,hp:5}),
                     updatedAt: serverTimestamp()
                 });
-                
             } else {
                 myRole = 'p1';
                 status.innerText = "建立房間中，等待挑戰者...";
                 const newMatchRef = doc(collection(db, 'matches'));
                 matchId = newMatchRef.id;
-                
                 await setDoc(newMatchRef, {
                     status: 'waiting',
                     createdAt: serverTimestamp(),
                     p1Id: userId,
-                    p1State: JSON.stringify(getInitialState()),
-                    p2State: JSON.stringify(getInitialState()),
+                    p1State: JSON.stringify({x:0,y:0,z:0,ry:0,ty:0,bx:0,hp:5}),
+                    p2State: JSON.stringify({x:0,y:0,z:0,ry:0,ty:0,bx:0,hp:5}),
                     events: []
                 });
             }
             
-            // Set global role for game loop
             window.gameState.myRole = myRole;
-            document.getElementById('role-debug').innerText = `Role: ${myRole}`;
-
             listenToMatch();
 
         } catch (e) {
-            console.error("Matchmaking error:", e);
+            console.error(e);
             status.innerText = "連線錯誤: " + e.message;
             btn.disabled = false;
         }
@@ -189,108 +194,59 @@
         const matchRef = doc(db, 'matches', matchId);
         const statusEl = document.getElementById('lobby-status');
 
-        unsubscribeMatch = onSnapshot(matchRef, (docSnap) => {
-            if (!docSnap.exists()) {
-                alert("房間已關閉");
-                location.reload();
-                return;
-            }
-
+        onSnapshot(matchRef, (docSnap) => {
+            if (!docSnap.exists()) return;
             const data = docSnap.data();
 
             if (myRole === 'p1' && data.status === 'waiting') {
                 statusEl.innerText = "等待對手加入...";
+                window.gameInterface.onGameStart('p1_waiting');
             } else if (data.status === 'playing') {
-                if (document.getElementById('ui-layer').style.display !== 'none') {
-                    // Pass role to game start
-                    window.startGame(myRole);
-                }
-                
+                window.gameInterface.onGameStart(myRole);
                 const remoteRole = myRole === 'p1' ? 'p2' : 'p1';
                 const remoteStateStr = data[remoteRole + 'State'];
                 if (remoteStateStr) {
-                    const rState = JSON.parse(remoteStateStr);
-                    window.updateRemoteTank(rState);
+                    window.gameInterface.onRemoteUpdate(JSON.parse(remoteStateStr));
                 }
             } else if (data.status === 'finished') {
-                window.endGame(data.winner === myRole);
+                window.gameInterface.onGameOver(data.winner === myRole);
+            }
+
+            const remoteRole = myRole === 'p1' ? 'p2' : 'p1';
+            const fireKey = `lastFire${remoteRole}`;
+            if (data[fireKey] && data[fireKey] > window.gameState.lastRemoteFireTimestamp) {
+                window.gameState.lastRemoteFireTimestamp = data[fireKey];
+                window.gameInterface.onRemoteFire();
             }
         });
     }
 
-    window.sendGameState = async function(pos, rot, turretRot, barrelRot) {
-        if (!matchId || !userId) return;
-        
-        const now = Date.now();
-        if (now - lastNetworkUpdate < 50) return; // Increase update rate slightly (20fps)
-        lastNetworkUpdate = now;
-
-        const stateObj = {
-            x: pos.x, y: pos.y, z: pos.z,
-            ry: rot.y,
-            ty: turretRot.y,
-            bx: barrelRot.x,
-            hp: window.gameState.myHP
-        };
-
-        const updateData = {};
-        updateData[myRole + 'State'] = JSON.stringify(stateObj);
-        // updateData['updatedAt'] = serverTimestamp(); // Reduce writes
-
-        try {
-            const matchRef = doc(db, 'matches', matchId);
-            await updateDoc(matchRef, updateData);
-        } catch (e) {
-            // console.warn("Update failed", e);
-        }
-    };
-
-    window.sendFireEvent = async function() {
-        if (!matchId) return;
-        const matchRef = doc(db, 'matches', matchId);
-        const updateData = {};
-        updateData[`lastFire${myRole}`] = Date.now();
-        await updateDoc(matchRef, updateData);
-    };
-
-    window.sendHitEvent = async function() {
-        if (window.gameState.myHP <= 0) {
-            const matchRef = doc(db, 'matches', matchId);
-            await updateDoc(matchRef, {
-                status: 'finished',
-                winner: myRole === 'p1' ? 'p2' : 'p1'
-            });
-        }
-    }
-
-    let lastProcessedFireP1 = 0;
-    let lastProcessedFireP2 = 0;
-
-    onSnapshot(doc(db, 'matches', matchId || 'dummy'), (snap) => {
-        if(!snap.exists()) return;
-        const data = snap.data();
-        
-        // Listen for ENEMY fire
-        const remoteRole = myRole === 'p1' ? 'p2' : 'p1';
-        const remoteFireKey = `lastFire${remoteRole}`;
-        const timestamp = data[remoteFireKey];
-
-        if (timestamp) {
-            let lastProcessed = remoteRole === 'p1' ? lastProcessedFireP1 : lastProcessedFireP2;
-            if (timestamp > lastProcessed) {
-                if (remoteRole === 'p1') lastProcessedFireP1 = timestamp;
-                else lastProcessedFireP2 = timestamp;
-                
-                if (window.gameState && window.gameState.running) {
-                    window.remoteFire();
-                }
+    window.networkLayer = {
+        sendState: async (stateObj) => {
+            if (!matchId || !myRole) return;
+            const now = Date.now();
+            if (now - lastNetworkUpdate < 50) return;
+            lastNetworkUpdate = now;
+            const updateData = {};
+            updateData[myRole + 'State'] = JSON.stringify(stateObj);
+            try { await updateDoc(doc(db, 'matches', matchId), updateData); } catch(e){}
+        },
+        sendFire: async () => {
+            if (!matchId) return;
+            const updateData = {};
+            updateData[`lastFire${myRole}`] = Date.now();
+            try { await updateDoc(doc(db, 'matches', matchId), updateData); } catch(e){}
+        },
+        sendHit: async () => {
+            if (!matchId) return;
+            if (window.gameState.myHP <= 0) {
+                await updateDoc(doc(db, 'matches', matchId), {
+                    status: 'finished',
+                    winner: myRole === 'p1' ? 'p2' : 'p1'
+                });
             }
         }
-    });
-
-    function getInitialState() {
-        return { x: 0, y: 0, z: 0, ry: 0, ty: 0, bx: 0, hp: 5 };
-    }
+    };
 </script>
 
 <script>
@@ -299,14 +255,10 @@
     const BOUNDS = MAP_SIZE / 2 - 2;
 
     window.gameState = { 
-        running: false, 
-        myHP: 5, 
-        enemyHP: 5, 
-        mirrored: true, 
-        inverted: false,
-        style: 'standard',
-        lastFire: 0,
-        myRole: null 
+        running: false, myHP: 5, enemyHP: 5, 
+        mirrored: true, inverted: false, style: 'standard',
+        lastFire: 0, lastRemoteFireTimestamp: 0, myRole: null,
+        positionSet: false // 標記是否已強制設定初始位置
     };
 
     const input = { move: {x:0, y:0}, aim: {x:0, y:0}, head: {x:0} };
@@ -318,26 +270,56 @@
     let bullets = [], obstacles = [];
     const clock = new THREE.Clock();
 
-    // --- Initialization ---
-    window.startGame = function(role) {
+    window.gameInterface.onGameStart = function(role) {
         document.getElementById('ui-layer').style.display = 'none';
         window.gameState.running = true;
-        window.gameState.myRole = role; // Ensure global state knows role
-
-        if(myTank && enemyTank) {
-            if(role === 'p1') {
+        window.gameState.myRole = role;
+        
+        // 更新 UI
+        document.getElementById('role-debug').innerText = role === 'p1_waiting' ? "我是 P1 (等待中)" : `我是 ${role.toUpperCase()}`;
+        
+        // 強制重設位置 (解決重疊問題)
+        if (myTank && enemyTank) {
+            if (role.startsWith('p1')) {
                 myTank.position.set(0, 0, 60);
-                myTank.rotation.y = Math.PI; // Face enemy
+                myTank.rotation.y = Math.PI;
                 enemyTank.position.set(0, 0, -60);
                 enemyTank.rotation.y = 0;
-            } else {
+            } else if (role === 'p2') {
                 myTank.position.set(0, 0, -60);
-                myTank.rotation.y = 0; // Face enemy
+                myTank.rotation.y = 0;
                 enemyTank.position.set(0, 0, 60);
                 enemyTank.rotation.y = Math.PI;
             }
+            window.gameState.positionSet = true;
         }
-    }
+    };
+
+    window.gameInterface.onRemoteUpdate = function(state) {
+        if(!enemyTank) return;
+        const tPos = new THREE.Vector3(state.x, state.y, state.z);
+        enemyTank.position.lerp(tPos, 0.3);
+        enemyTank.rotation.y = lerpAngle(enemyTank.rotation.y, state.ry, 0.3);
+        enemyTurret.rotation.y = lerpAngle(enemyTurret.rotation.y, state.ty, 0.3);
+        enemyBarrel.rotation.x = lerpAngle(enemyBarrel.rotation.x, state.bx, 0.3);
+        if(state.hp !== undefined) {
+            window.gameState.enemyHP = state.hp;
+            updateHPUI();
+        }
+    };
+
+    window.gameInterface.onRemoteFire = function() {
+        if(enemyBarrel) { enemyBarrel.position.z = 1.0; shoot(enemyBarrel, true); }
+    };
+
+    window.gameInterface.onGameOver = function(win) {
+        window.gameState.running = false;
+        document.getElementById('ui-layer').style.display = 'flex';
+        document.getElementById('lobby-panel').style.display = 'none';
+        document.getElementById('game-over-panel').style.display = 'block';
+        document.getElementById('end-title').innerText = win ? "VICTORY" : "DEFEAT";
+        document.getElementById('end-title').style.color = win ? "#0f0" : "#f00";
+    };
 
     function initThree() {
         const container = document.getElementById('canvas-container');
@@ -358,21 +340,13 @@
         const grid = new THREE.GridHelper(MAP_SIZE, 40, 0x555555, 0x222222); scene.add(grid);
         createWalls();
 
-        // My Tank (Green)
         const p1 = createModel(0x4B5320, false);
         myTank = p1.root; myTurret = p1.turret; myBarrel = p1.barrel;
         addLaser(myBarrel);
-        
-        // Add "YOU" marker
-        const markerGeo = new THREE.ConeGeometry(0.5, 1, 8);
-        markerGeo.rotateX(Math.PI);
-        const marker = new THREE.Mesh(markerGeo, new THREE.MeshBasicMaterial({color: 0x00ff00}));
-        marker.position.y = 4;
-        myTank.add(marker);
-        
+        const marker = new THREE.Mesh(new THREE.ConeGeometry(0.5, 1, 8), new THREE.MeshBasicMaterial({color: 0x00ff00}));
+        marker.rotation.x = Math.PI; marker.position.y = 5; myTank.add(marker);
         scene.add(myTank);
 
-        // Enemy Tank (Red)
         const p2 = createModel(0xAA3333, true);
         enemyTank = p2.root; enemyTurret = p2.turret; enemyBarrel = p2.barrel;
         scene.add(enemyTank);
@@ -385,10 +359,7 @@
         const h = 4; const geo = new THREE.BoxGeometry(MAP_SIZE, h, 2);
         const mat = new THREE.MeshStandardMaterial({color: 0x00ffff, emissive: 0x004444, transparent: true, opacity: 0.5});
         const pos = [[0, h/2, -MAP_SIZE/2], [0, h/2, MAP_SIZE/2], [-MAP_SIZE/2, h/2, 0, Math.PI/2], [MAP_SIZE/2, h/2, 0, Math.PI/2]];
-        pos.forEach(p => {
-            const w = new THREE.Mesh(geo, mat); w.position.set(p[0], p[1], p[2]); 
-            if(p[3]) w.rotation.y = p[3]; w.userData.type='wall'; scene.add(w);
-        });
+        pos.forEach(p => { const w = new THREE.Mesh(geo, mat); w.position.set(p[0], p[1], p[2]); if(p[3]) w.rotation.y = p[3]; w.userData.type='wall'; scene.add(w); });
     }
 
     function createModel(color, isEnemy) {
@@ -417,45 +388,18 @@
         const muzzlePos = new THREE.Vector3(0, 0, 6).applyMatrix4(origin.matrixWorld);
         const quat = new THREE.Quaternion(); origin.getWorldQuaternion(quat);
         const dir = new THREE.Vector3(0, 0, 1).applyQuaternion(quat);
-
         const bullet = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.4, 4, 8).rotateX(Math.PI/2), new THREE.MeshBasicMaterial({color: isEnemy?0xff3333:0xffff00}));
         bullet.position.copy(muzzlePos); bullet.quaternion.copy(quat);
         bullet.add(new THREE.PointLight(isEnemy?0xff3333:0xffff00, 1, 15));
         bullet.userData = { vel: dir.multiplyScalar(70), life: 3, isEnemy };
         scene.add(bullet); bullets.push(bullet);
-
         const flash = new THREE.Mesh(new THREE.SphereGeometry(1.5,16,16), new THREE.MeshBasicMaterial({color: isEnemy?0xff8888:0xffffff, transparent:true, opacity:0.9}));
         flash.position.copy(muzzlePos); scene.add(flash);
         let s=1; const anim = ()=>{ s+=0.4; flash.scale.setScalar(s); flash.material.opacity-=0.15; if(flash.material.opacity>0)requestAnimationFrame(anim); else scene.remove(flash);}; anim();
     }
 
-    window.remoteFire = function() {
-        if(enemyBarrel) {
-            enemyBarrel.position.z = 1.0;
-            shoot(enemyBarrel, true);
-        }
-    };
-
-    window.updateRemoteTank = function(stateData) {
-        if(!enemyTank) return;
-        const tPos = new THREE.Vector3(stateData.x, stateData.y, stateData.z);
-        enemyTank.position.lerp(tPos, 0.2);
-        
-        enemyTank.rotation.y = lerpAngle(enemyTank.rotation.y, stateData.ry, 0.2);
-        enemyTurret.rotation.y = lerpAngle(enemyTurret.rotation.y, stateData.ty, 0.2);
-        enemyBarrel.rotation.x = lerpAngle(enemyBarrel.rotation.x, stateData.bx, 0.2);
-
-        if(stateData.hp !== undefined) {
-            window.gameState.enemyHP = stateData.hp;
-            updateHPUI();
-        }
-    };
-
     function lerpAngle(a, b, t) {
-        let diff = b - a;
-        while (diff > Math.PI) diff -= Math.PI * 2;
-        while (diff < -Math.PI) diff += Math.PI * 2;
-        return a + diff * t;
+        let diff = b - a; while (diff > Math.PI) diff -= Math.PI * 2; while (diff < -Math.PI) diff += Math.PI * 2; return a + diff * t;
     }
 
     function animate() {
@@ -469,8 +413,12 @@
         input.head.x += (target.head.x - input.head.x) * 0.1;
 
         if(myTank) {
+            // 移動邏輯 (修復版)
             if(Math.abs(input.move.x)>0.01) myTank.rotation.y -= input.move.x*2*dt;
+            // 修正：移動方向需配合車身朝向
+            // 因為 myTank 是 Group，使用 translateZ 會沿著目前朝向移動
             if(Math.abs(input.move.y)>0.01) myTank.translateZ(input.move.y*12*dt);
+            
             myTank.position.x = Math.max(-BOUNDS, Math.min(BOUNDS, myTank.position.x));
             myTank.position.z = Math.max(-BOUNDS, Math.min(BOUNDS, myTank.position.z));
 
@@ -488,8 +436,11 @@
             const lookAtTargetPos = lookAtOffsetLocal.applyMatrix4(myTurret.matrixWorld);
             camera.lookAt(lookAtTargetPos);
 
-            if(window.sendGameState) {
-                window.sendGameState(myTank.position, myTank.rotation, myTurret.rotation, myBarrel.rotation);
+            if(window.networkLayer && window.networkLayer.sendState) {
+                window.networkLayer.sendState({
+                    x: myTank.position.x, y: myTank.position.y, z: myTank.position.z,
+                    ry: myTank.rotation.y, ty: myTurret.rotation.y, bx: myBarrel.rotation.x, hp: window.gameState.myHP
+                });
             }
         }
 
@@ -519,24 +470,7 @@
         updateHPUI();
         document.getElementById('damage-overlay').style.opacity = 0.5; 
         setTimeout(()=>document.getElementById('damage-overlay').style.opacity=0, 200);
-        if(window.sendHitEvent) window.sendHitEvent();
-    }
-
-    function createExplosion(pos) {
-        const m = new THREE.Mesh(new THREE.SphereGeometry(2.5), new THREE.MeshBasicMaterial({color:0xffaa00, wireframe:window.gameState.style==='cyber'}));
-        m.position.copy(pos); scene.add(m);
-        let s=1; const anim = ()=>{ s+=0.3; m.scale.setScalar(s); m.material.opacity-=0.08; if(s<4)requestAnimationFrame(anim); else scene.remove(m); }; anim();
-    }
-
-    window.endGame = function(win) {
-        window.gameState.running = false;
-        document.getElementById('ui-layer').style.display = 'flex';
-        document.getElementById('lobby-panel').style.display = 'none';
-        const p = document.getElementById('game-over-panel');
-        p.style.display = 'block';
-        document.getElementById('end-title').innerText = win ? "VICTORY" : "DEFEAT";
-        document.getElementById('end-title').style.color = win ? "#0f0" : "#f00";
-        document.getElementById('end-reason').innerText = win ? "敵艦擊沉！" : "機體全毀...";
+        if(window.networkLayer && window.networkLayer.sendHit) window.networkLayer.sendHit();
     }
 
     function updateHPUI() {
@@ -569,31 +503,55 @@
     const holistic = new Holistic({locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/holistic/${f}`});
     holistic.setOptions({modelComplexity: 1, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5});
     holistic.onResults(res => {
+        document.getElementById('debug-info').innerText = "AI 運作中 | L-Hand: " + (res.leftHandLandmarks?"Yes":"No") + " | Pose: " + (res.poseLandmarks?"Yes":"No");
+        
         ctx.clearRect(0,0,640,480);
         if(res.image) { ctx.globalAlpha=0.5; ctx.drawImage(res.image,0,0,640,480); ctx.globalAlpha=1; }
-        drawJoy(0.75, 0.6, "移動", target.move); drawJoy(0.25, 0.6, "瞄準", target.aim);
-        drawCooldown(0.25, 0.6, window.gameState.lastFire, CONFIG.fireCD);
+        drawJoy(0.25, 0.6, "移動 (左手)", target.move); drawJoy(0.75, 0.6, "瞄準 (右手)", target.aim);
+        drawCooldown(0.75, 0.6, window.gameState.lastFire, CONFIG.fireCD);
+
+        // --- 核心修復：雙重偵測移動 ---
+        // 優先使用手部模型，若無則使用身體 Pose 模型 (手腕)
+        let moveX = 0, moveY = 0;
+        let detected = false;
 
         if(res.leftHandLandmarks) {
             drawHand(res.leftHandLandmarks);
-            let dx = (res.leftHandLandmarks[9].x - 0.75)*-2.5, dy = (res.leftHandLandmarks[9].y - 0.6)*-2.5;
-            if(window.gameState.inverted) dx *= -1;
-            target.move = { x: clamp(dx), y: clamp(dy) };
-            drawJoyStick(0.75, 0.6, target.move.x, target.move.y, true);
-        } else target.move = {x:0, y:0};
+            moveX = (res.leftHandLandmarks[9].x - 0.25)*-2.5;
+            moveY = (res.leftHandLandmarks[9].y - 0.6)*-2.5;
+            detected = true;
+        } else if (res.poseLandmarks) {
+            // 使用 Pose Landmark 19 (左食指) 或 15 (左手腕)
+            const wrist = res.poseLandmarks[15]; // Left Wrist
+            if (wrist && wrist.visibility > 0.5) {
+                // 繪製一個替代點
+                ctx.beginPath(); ctx.arc(wrist.x*640, wrist.y*480, 10, 0, 7); ctx.fillStyle="yellow"; ctx.fill();
+                moveX = (wrist.x - 0.25)*-2.5;
+                moveY = (wrist.y - 0.6)*-2.5;
+                detected = true;
+            }
+        }
+
+        if (detected) {
+            if(window.gameState.inverted) moveX *= -1;
+            target.move = { x: clamp(moveX), y: clamp(moveY) };
+            drawJoyStick(0.25, 0.6, target.move.x, target.move.y, true);
+        } else {
+            target.move = {x:0, y:0};
+        }
         
         if(res.rightHandLandmarks) {
             drawHand(res.rightHandLandmarks);
-            target.aim = { x: clamp((res.rightHandLandmarks[9].x - 0.25)*-2.5), y: 0 };
+            target.aim = { x: clamp((res.rightHandLandmarks[9].x - 0.75)*-2.5), y: 0 };
             const pinch = Math.hypot(res.rightHandLandmarks[4].x - res.rightHandLandmarks[6].x, res.rightHandLandmarks[4].y - res.rightHandLandmarks[6].y) < 0.05;
             const now = Date.now();
             if(pinch && now - window.gameState.lastFire > CONFIG.fireCD && window.gameState.running) { 
                 window.gameState.lastFire = now; 
                 if(myBarrel) myBarrel.position.z = 1.0; 
                 shoot(myBarrel, false); 
-                if(window.sendFireEvent) window.sendFireEvent();
+                if(window.networkLayer && window.networkLayer.sendFire) window.networkLayer.sendFire();
             }
-            drawJoyStick(0.25, 0.6, target.aim.x, target.aim.y, pinch);
+            drawJoyStick(0.75, 0.6, target.aim.x, target.aim.y, pinch);
         } else target.aim = {x:0, y:0};
         
         target.head.x = res.faceLandmarks ? (res.faceLandmarks[1].x - 0.5)*(window.gameState.mirrored?-3:3) : 0;
