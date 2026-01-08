@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Three.js 坦克 Online (雙重偵測版)</title>
+    <title>Three.js 坦克 Online (修正版)</title>
     <style>
         body { margin: 0; overflow: hidden; background: #050505; font-family: "Segoe UI", sans-serif; user-select: none; color: white; }
         #canvas-container { position: absolute; width: 100%; height: 100vh; z-index: 1; }
@@ -32,45 +32,75 @@
         button {
             background: #00ffff; color: #000; border: none; padding: 15px 40px;
             font-size: 20px; font-weight: bold; cursor: pointer; border-radius: 5px;
-            transition: 0.2s; text-transform: uppercase;
+            transition: 0.2s; text-transform: uppercase; margin: 5px;
         }
         button:hover { background: #fff; box-shadow: 0 0 15px #00ffff; }
-        button:disabled { background: #555; color: #888; cursor: not-allowed; box-shadow: none; }
+        button:disabled { background: #666; cursor: not-allowed; }
+        button.secondary { background: transparent; border: 2px solid #00ffff; color: #00ffff; }
+        button.secondary:hover { background: rgba(0, 255, 255, 0.2); }
 
         #settings-panel { position: absolute; top: 280px; right: 20px; z-index: 5; display: flex; flex-direction: column; gap: 5px; }
-        .btn-sm { background: rgba(0,255,255,0.2); border: 1px solid #0ff; color: #fff; padding: 5px 10px; cursor: pointer; }
+        .btn-sm { background: rgba(0,255,255,0.2); border: 1px solid #0ff; color: #fff; padding: 5px 10px; cursor: pointer; border-radius: 3px; }
         .btn-sm.active { background: #0ff; color: #000; }
         
         #damage-overlay { position: absolute; width: 100%; height: 100%; background: red; opacity: 0; pointer-events: none; z-index: 4; transition: opacity 0.1s; }
-        #debug-info { position: absolute; bottom: 10px; right: 20px; color: #00ff00; font-family: monospace; font-size: 12px; z-index: 5; text-align: right; }
+        
+        #debug-panel { 
+            position: absolute; bottom: 20px; left: 20px; 
+            background: rgba(0,0,0,0.7); padding: 10px; border-radius: 5px;
+            font-family: monospace; font-size: 14px; color: lime; z-index: 5;
+            pointer-events: none; text-align: left; min-width: 250px;
+        }
+
+        #connection-status {
+            position: absolute; top: 70px; right: 360px; 
+            background: rgba(0,0,0,0.7); padding: 8px 15px; border-radius: 5px;
+            font-size: 14px; z-index: 5;
+        }
+        .status-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 8px; }
+        .status-dot.connected { background: #0f0; }
+        .status-dot.disconnected { background: #f00; }
+        .status-dot.waiting { background: #ff0; animation: blink 1s infinite; }
+        @keyframes blink { 50% { opacity: 0.5; } }
     </style>
 </head>
 <body>
 
 <div id="damage-overlay"></div>
-<div id="debug-info">系統初始化中...</div>
+
+<div id="connection-status" style="display: none;">
+    <span class="status-dot disconnected" id="conn-dot"></span>
+    <span id="conn-text">未連線</span>
+</div>
+
+<div id="debug-panel">
+    <div id="debug-status">系統狀態: 初始化...</div>
+    <div id="debug-data">偵測數據: 等待中...</div>
+    <div id="debug-network">網路: 離線</div>
+</div>
 
 <div id="ui-layer">
     <div class="panel" id="lobby-panel">
         <h1>Tank Battle Online</h1>
-        <p>手勢操控多人對戰系統</p>
+        <p>請將手放在螢幕兩側的方框內<br>(左手移動，右手瞄準，捏合手指發射)</p>
         <div class="status" id="lobby-status">初始化中...</div>
         <button id="find-match-btn" onclick="findMatch()">尋找對戰</button>
+        <button class="secondary" onclick="startOffline()">單人試駕</button>
     </div>
     <div class="panel" id="game-over-panel" style="display: none;">
         <h1 id="end-title">GAME OVER</h1>
-        <p id="end-reason">...</p>
+        <p id="end-reason">遊戲結束</p>
         <button onclick="location.reload()">返回大廳</button>
     </div>
 </div>
 
-<div id="hp-bar">
+<div id="hp-bar" style="display: none;">
     <div>我方: <span id="my-hp">❤️❤️❤️❤️❤️</span></div>
     <div style="font-size: 18px; color: #aaa; margin-top:5px;">敵方: <span id="enemy-hp">❤️❤️❤️❤️❤️</span></div>
     <div id="role-debug" style="font-size: 14px; color: #aaa; margin-top: 5px;"></div>
 </div>
 
-<div id="settings-panel">
+<div id="settings-panel" style="display: none;">
     <button class="btn-sm active" id="btn-mirror" onclick="toggleMirror()">鏡像: 開</button>
     <button class="btn-sm" id="btn-invert" onclick="toggleInvert()">反向: 關</button>
     <select class="btn-sm" onchange="changeStyle(this.value)" style="background: rgba(0,0,0,0.8);">
@@ -84,181 +114,364 @@
 <canvas id="output_canvas" width="640" height="480"></canvas>
 <div id="canvas-container"></div>
 
+<!-- Libraries -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/holistic/holistic.js"></script>
 
+<!-- Hand connections definition -->
+<script>
+    // MediaPipe hand connections for drawing
+    const HAND_CONNECTIONS = [
+        [0, 1], [1, 2], [2, 3], [3, 4],
+        [0, 5], [5, 6], [6, 7], [7, 8],
+        [0, 9], [9, 10], [10, 11], [11, 12],
+        [0, 13], [13, 14], [14, 15], [15, 16],
+        [0, 17], [17, 18], [18, 19], [19, 20],
+        [5, 9], [9, 13], [13, 17]
+    ];
+</script>
+
+<!-- Fallback handlers -->
 <script>
     window.findMatch = function() { alert("系統載入中，請稍候..."); };
+    window.startOffline = function() { alert("系統載入中，請稍候..."); };
     window.gameInterface = {
-        onGameStart: (role) => console.log("Waiting...", role),
+        onGameStart: (role) => {},
         onRemoteUpdate: (state) => {},
         onRemoteFire: () => {},
-        onGameOver: (win) => {}
+        onGameOver: (win) => {},
+        onEnemyHit: () => {}
+    };
+    window.networkLayer = {
+        sendState: () => {},
+        sendFire: () => {},
+        sendHit: () => {}
     };
 </script>
 
+<!-- Firebase Module -->
 <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
     import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-    import { getFirestore, collection, doc, setDoc, updateDoc, onSnapshot, getDocs, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+    import { getFirestore, collection, doc, setDoc, updateDoc, onSnapshot, getDocs, deleteDoc, serverTimestamp, query, where, orderBy, limit } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
     const firebaseConfig = {
-      apiKey: "AIzaSyAwgF1STeKUpjKU87cvS3cJqoHUp8mt_-8",
-      authDomain: "tank-94148.firebaseapp.com",
-      projectId: "tank-94148",
-      storageBucket: "tank-94148.firebasestorage.app",
-      messagingSenderId: "433724180176",
-      appId: "1:433724180176:web:008f2c3ebbea287aed00d5",
-      measurementId: "G-C2SGZJQKCY"
+        apiKey: "AIzaSyAwgF1STeKUpjKU87cvS3cJqoHUp8mt_-8",
+        authDomain: "tank-94148.firebaseapp.com",
+        projectId: "tank-94148",
+        storageBucket: "tank-94148.firebasestorage.app",
+        messagingSenderId: "433724180176",
+        appId: "1:433724180176:web:008f2c3ebbea287aed00d5",
+        measurementId: "G-C2SGZJQKCY"
     };
 
     let app, auth, db;
+    let firebaseReady = false;
+
     try {
         app = initializeApp(firebaseConfig);
         auth = getAuth(app);
         db = getFirestore(app);
-        document.getElementById('lobby-status').innerText = "連線成功，請開始對戰";
+        firebaseReady = true;
+        const statusEl = document.getElementById('lobby-status');
+        if(statusEl) statusEl.innerText = "連線成功，請開始對戰";
+        updateConnectionStatus('connected', '已連線');
     } catch (e) {
-        document.getElementById('lobby-status').innerText = "系統錯誤: " + e.message;
+        console.error("Firebase init error:", e);
+        const statusEl = document.getElementById('lobby-status');
+        if(statusEl) statusEl.innerText = "連線錯誤: " + e.message;
+        updateConnectionStatus('disconnected', '連線失敗');
+    }
+
+    function updateConnectionStatus(status, text) {
+        const dot = document.getElementById('conn-dot');
+        const textEl = document.getElementById('conn-text');
+        if(dot) {
+            dot.className = 'status-dot ' + status;
+        }
+        if(textEl) textEl.innerText = text;
     }
 
     let userId = null;
     let matchId = null;
     let myRole = null; 
     let lastNetworkUpdate = 0;
+    let unsubscribe = null;
+    let lastProcessedHitId = 0;
+
+    window.startOffline = function() {
+        if(window.startGame) window.startGame('offline');
+    };
 
     window.findMatch = async function() {
+        if(!firebaseReady) {
+            alert("Firebase 未準備好，請重新載入頁面");
+            return;
+        }
+
         const btn = document.getElementById('find-match-btn');
         const status = document.getElementById('lobby-status');
-        btn.disabled = true;
-        status.innerText = "正在連線伺服器...";
+        if(btn) btn.disabled = true;
+        if(status) status.innerText = "正在連線伺服器...";
+        updateConnectionStatus('waiting', '連線中...');
 
         try {
             const userCredential = await signInAnonymously(auth);
             userId = userCredential.user.uid;
-            status.innerText = "搜尋對戰中...";
+            console.log("Signed in as:", userId);
+            if(status) status.innerText = "搜尋對戰中...";
 
             const battlesRef = collection(db, 'matches'); 
             const snapshot = await getDocs(battlesRef);
             let foundRoom = null;
+            let foundRoomData = null;
 
-            snapshot.forEach(doc => {
-                const data = doc.data();
-                const now = Date.now();
+            const now = Date.now();
+            snapshot.forEach(docSnap => {
+                const data = docSnap.data();
                 const created = data.createdAt ? data.createdAt.toMillis() : 0;
-                if (data.status === 'waiting' && (now - created < 3600000) && !foundRoom) {
-                    foundRoom = doc.id;
+                // Find waiting rooms less than 5 minutes old
+                if (data.status === 'waiting' && (now - created < 300000) && !foundRoom && data.p1Id !== userId) {
+                    foundRoom = docSnap.id;
+                    foundRoomData = data;
                 }
             });
 
             if (foundRoom) {
                 matchId = foundRoom;
                 myRole = 'p2';
-                status.innerText = "找到房間！正在加入...";
+                console.log("Joining room:", matchId, "as P2");
+                if(status) status.innerText = "找到房間！正在加入...";
+                
                 const matchRef = doc(db, 'matches', matchId);
                 await updateDoc(matchRef, {
                     status: 'playing',
                     p2Id: userId,
-                    p2State: JSON.stringify({x:0,y:0,z:0,ry:0,ty:0,bx:0,hp:5}),
+                    p2State: JSON.stringify({x:0, y:0, z:-60, ry:0, ty:0, bx:0, hp:5}),
                     updatedAt: serverTimestamp()
                 });
+                updateConnectionStatus('connected', '已配對');
             } else {
                 myRole = 'p1';
-                status.innerText = "建立房間中，等待挑戰者...";
+                console.log("Creating new room as P1");
+                if(status) status.innerText = "建立房間中，等待挑戰者...";
+                
                 const newMatchRef = doc(collection(db, 'matches'));
                 matchId = newMatchRef.id;
                 await setDoc(newMatchRef, {
                     status: 'waiting',
                     createdAt: serverTimestamp(),
                     p1Id: userId,
-                    p1State: JSON.stringify({x:0,y:0,z:0,ry:0,ty:0,bx:0,hp:5}),
-                    p2State: JSON.stringify({x:0,y:0,z:0,ry:0,ty:0,bx:0,hp:5}),
-                    events: []
+                    p1State: JSON.stringify({x:0, y:0, z:60, ry:Math.PI, ty:0, bx:0, hp:5}),
+                    p2State: JSON.stringify({x:0, y:0, z:-60, ry:0, ty:0, bx:0, hp:5}),
+                    p1Hits: 0,
+                    p2Hits: 0,
+                    lastFireP1: 0,
+                    lastFireP2: 0
                 });
+                updateConnectionStatus('waiting', '等待對手...');
             }
             
             window.gameState.myRole = myRole;
             listenToMatch();
 
         } catch (e) {
-            console.error(e);
-            status.innerText = "連線錯誤: " + e.message;
-            btn.disabled = false;
+            console.error("Find match error:", e);
+            if(status) status.innerText = "連線錯誤: " + e.message;
+            if(btn) btn.disabled = false;
+            updateConnectionStatus('disconnected', '錯誤');
         }
     };
 
     function listenToMatch() {
+        if(unsubscribe) unsubscribe();
+        
         const matchRef = doc(db, 'matches', matchId);
         const statusEl = document.getElementById('lobby-status');
+        const debugNetwork = document.getElementById('debug-network');
 
-        onSnapshot(matchRef, (docSnap) => {
-            if (!docSnap.exists()) return;
+        unsubscribe = onSnapshot(matchRef, (docSnap) => {
+            if (!docSnap.exists()) {
+                console.log("Match document deleted");
+                return;
+            }
             const data = docSnap.data();
+            
+            if(debugNetwork) {
+                debugNetwork.innerText = `網路: ${data.status} | 角色: ${myRole}`;
+            }
 
             if (myRole === 'p1' && data.status === 'waiting') {
-                statusEl.innerText = "等待對手加入...";
-                window.gameInterface.onGameStart('p1_waiting');
+                if(statusEl) statusEl.innerText = "等待對手加入...";
+                if(window.startGame) window.startGame('p1_waiting');
             } else if (data.status === 'playing') {
-                window.gameInterface.onGameStart(myRole);
+                updateConnectionStatus('connected', '對戰中');
+                if (window.startGame) window.startGame(myRole);
+                
+                // Update remote player state
                 const remoteRole = myRole === 'p1' ? 'p2' : 'p1';
                 const remoteStateStr = data[remoteRole + 'State'];
-                if (remoteStateStr) {
-                    window.gameInterface.onRemoteUpdate(JSON.parse(remoteStateStr));
+                if (remoteStateStr && window.gameInterface.onRemoteUpdate) {
+                    try {
+                        const remoteState = JSON.parse(remoteStateStr);
+                        window.gameInterface.onRemoteUpdate(remoteState);
+                    } catch(e) {
+                        console.error("Parse remote state error:", e);
+                    }
                 }
-            } else if (data.status === 'finished') {
-                window.gameInterface.onGameOver(data.winner === myRole);
-            }
 
-            const remoteRole = myRole === 'p1' ? 'p2' : 'p1';
-            const fireKey = `lastFire${remoteRole}`;
-            if (data[fireKey] && data[fireKey] > window.gameState.lastRemoteFireTimestamp) {
-                window.gameState.lastRemoteFireTimestamp = data[fireKey];
-                window.gameInterface.onRemoteFire();
+                // Check for remote fire
+                const remoteFireKey = `lastFire${remoteRole.charAt(0).toUpperCase() + remoteRole.slice(1)}`;
+                const remoteFireTime = data[remoteFireKey] || 0;
+                if (remoteFireTime > (window.gameState.lastRemoteFireTimestamp || 0)) {
+                    window.gameState.lastRemoteFireTimestamp = remoteFireTime;
+                    if(window.gameInterface.onRemoteFire) window.gameInterface.onRemoteFire();
+                }
+
+                // Check for hits on me
+                const myHitKey = myRole + 'Hits';
+                const myHits = data[myHitKey] || 0;
+                if (myHits > (window.gameState.lastProcessedHits || 0)) {
+                    const newHits = myHits - (window.gameState.lastProcessedHits || 0);
+                    window.gameState.lastProcessedHits = myHits;
+                    for(let i = 0; i < newHits; i++) {
+                        if(window.takeDamage) window.takeDamage();
+                    }
+                }
+
+            } else if (data.status === 'finished') {
+                const won = data.winner === myRole;
+                if(window.gameInterface.onGameOver) window.gameInterface.onGameOver(won);
             }
+        }, (error) => {
+            console.error("Snapshot error:", error);
+            updateConnectionStatus('disconnected', '連線中斷');
         });
     }
 
     window.networkLayer = {
         sendState: async (stateObj) => {
-            if (!matchId || !myRole) return;
+            if (!matchId || !myRole || !firebaseReady) return;
             const now = Date.now();
-            if (now - lastNetworkUpdate < 50) return;
+            if (now - lastNetworkUpdate < 50) return; // Rate limit: 20 updates/sec
             lastNetworkUpdate = now;
+            
             const updateData = {};
             updateData[myRole + 'State'] = JSON.stringify(stateObj);
-            try { await updateDoc(doc(db, 'matches', matchId), updateData); } catch(e){}
+            updateData['updatedAt'] = serverTimestamp();
+            
+            try { 
+                await updateDoc(doc(db, 'matches', matchId), updateData); 
+            } catch(e) {
+                console.error("Send state error:", e);
+            }
         },
+        
         sendFire: async () => {
-            if (!matchId) return;
+            if (!matchId || !myRole || !firebaseReady) return;
             const updateData = {};
-            updateData[`lastFire${myRole}`] = Date.now();
-            try { await updateDoc(doc(db, 'matches', matchId), updateData); } catch(e){}
+            const fireKey = `lastFire${myRole.charAt(0).toUpperCase() + myRole.slice(1)}`;
+            updateData[fireKey] = Date.now();
+            
+            try { 
+                await updateDoc(doc(db, 'matches', matchId), updateData); 
+            } catch(e) {
+                console.error("Send fire error:", e);
+            }
         },
-        sendHit: async () => {
-            if (!matchId) return;
-            if (window.gameState.myHP <= 0) {
+        
+        sendHitOnEnemy: async () => {
+            if (!matchId || !myRole || !firebaseReady) return;
+            const enemyRole = myRole === 'p1' ? 'p2' : 'p1';
+            const hitKey = enemyRole + 'Hits';
+            
+            try {
+                const matchRef = doc(db, 'matches', matchId);
+                const docSnap = await getDocs(query(collection(db, 'matches')));
+                // Increment enemy hits
+                const currentDoc = await new Promise((resolve) => {
+                    const unsub = onSnapshot(matchRef, (snap) => {
+                        unsub();
+                        resolve(snap);
+                    });
+                });
+                
+                if(currentDoc.exists()) {
+                    const data = currentDoc.data();
+                    const currentHits = data[hitKey] || 0;
+                    const updateData = {};
+                    updateData[hitKey] = currentHits + 1;
+                    
+                    // Check for game over
+                    if(currentHits + 1 >= 5) {
+                        updateData.status = 'finished';
+                        updateData.winner = myRole;
+                    }
+                    
+                    await updateDoc(matchRef, updateData);
+                }
+            } catch(e) {
+                console.error("Send hit error:", e);
+            }
+        },
+        
+        sendGameOver: async (iWon) => {
+            if (!matchId || !firebaseReady) return;
+            try {
                 await updateDoc(doc(db, 'matches', matchId), {
                     status: 'finished',
-                    winner: myRole === 'p1' ? 'p2' : 'p1'
+                    winner: iWon ? myRole : (myRole === 'p1' ? 'p2' : 'p1')
                 });
+            } catch(e) {
+                console.error("Send game over error:", e);
             }
         }
     };
+
+    // Cleanup on page unload
+    window.addEventListener('beforeunload', async () => {
+        if(unsubscribe) unsubscribe();
+        if(matchId && myRole === 'p1' && window.gameState && !window.gameState.running) {
+            // Clean up waiting room if P1 leaves before match starts
+            try {
+                await deleteDoc(doc(db, 'matches', matchId));
+            } catch(e) {}
+        }
+    });
 </script>
 
 <script>
-    const CONFIG = { smooth: 0.15, aimSmooth: 0.02, sensitivity: 2.5, deadzone: 0.1, fireCD: 500 }; 
+    // Game Configuration
+    const CONFIG = { 
+        moveSmooth: 0.15, 
+        aimSmooth: 0.08, 
+        sensitivity: 2.5, 
+        deadzone: 0.1, 
+        fireCD: 500,
+        bulletSpeed: 80,
+        tankSpeed: 15,
+        turnSpeed: 2.0
+    }; 
+    
     const MAP_SIZE = 150; 
-    const BOUNDS = MAP_SIZE / 2 - 2;
+    const BOUNDS = MAP_SIZE / 2 - 5;
 
     window.gameState = { 
-        running: false, myHP: 5, enemyHP: 5, 
-        mirrored: true, inverted: false, style: 'standard',
-        lastFire: 0, lastRemoteFireTimestamp: 0, myRole: null,
-        positionSet: false // 標記是否已強制設定初始位置
+        running: false, 
+        myHP: 5, 
+        enemyHP: 5, 
+        mirrored: true, 
+        inverted: false, 
+        style: 'standard',
+        lastFire: 0, 
+        lastRemoteFireTimestamp: 0, 
+        lastProcessedHits: 0,
+        myRole: null,
+        positionSet: false,
+        gameStarted: false
     };
 
     const input = { move: {x:0, y:0}, aim: {x:0, y:0}, head: {x:0} };
@@ -270,314 +483,831 @@
     let bullets = [], obstacles = [];
     const clock = new THREE.Clock();
 
-    window.gameInterface.onGameStart = function(role) {
-        document.getElementById('ui-layer').style.display = 'none';
-        window.gameState.running = true;
-        window.gameState.myRole = role;
+    function createExplosion(pos) {
+        const color = window.gameState.style === 'cyber' ? 0x00ff00 : 0xffaa00;
+        const m = new THREE.Mesh(
+            new THREE.SphereGeometry(2.5), 
+            new THREE.MeshBasicMaterial({
+                color: color, 
+                wireframe: window.gameState.style === 'cyber',
+                transparent: true,
+                opacity: 1
+            })
+        );
+        m.position.copy(pos); 
+        scene.add(m);
         
-        // 更新 UI
-        document.getElementById('role-debug').innerText = role === 'p1_waiting' ? "我是 P1 (等待中)" : `我是 ${role.toUpperCase()}`;
-        
-        // 強制重設位置 (解決重疊問題)
-        if (myTank && enemyTank) {
-            if (role.startsWith('p1')) {
-                myTank.position.set(0, 0, 60);
-                myTank.rotation.y = Math.PI;
-                enemyTank.position.set(0, 0, -60);
-                enemyTank.rotation.y = 0;
-            } else if (role === 'p2') {
-                myTank.position.set(0, 0, -60);
-                myTank.rotation.y = 0;
-                enemyTank.position.set(0, 0, 60);
-                enemyTank.rotation.y = Math.PI;
+        let s = 1; 
+        const anim = () => { 
+            s += 0.3; 
+            m.scale.setScalar(s); 
+            m.material.opacity -= 0.08; 
+            if (m.material.opacity > 0 && s < 5) {
+                requestAnimationFrame(anim); 
+            } else {
+                scene.remove(m);
+                m.geometry.dispose();
+                m.material.dispose();
             }
-            window.gameState.positionSet = true;
+        }; 
+        anim();
+    }
+
+    function updateHPUI() {
+        const myHpEl = document.getElementById('my-hp');
+        if(myHpEl) myHpEl.innerText = "❤️".repeat(Math.max(0, window.gameState.myHP));
+        const enemyHpEl = document.getElementById('enemy-hp');
+        if(enemyHpEl) enemyHpEl.innerText = "❤️".repeat(Math.max(0, window.gameState.enemyHP));
+    }
+
+    window.takeDamage = function() {
+        window.gameState.myHP--;
+        updateHPUI();
+        
+        const overlay = document.getElementById('damage-overlay');
+        if(overlay) {
+            overlay.style.opacity = 0.5; 
+            setTimeout(() => overlay.style.opacity = 0, 200);
+        }
+        
+        if(window.gameState.myHP <= 0) {
+            window.gameInterface.onGameOver(false);
+        }
+    };
+
+    function hitEnemy() {
+        window.gameState.enemyHP--;
+        updateHPUI();
+        
+        if(window.networkLayer && window.networkLayer.sendHitOnEnemy) {
+            window.networkLayer.sendHitOnEnemy();
+        }
+        
+        if(window.gameState.enemyHP <= 0) {
+            window.gameInterface.onGameOver(true);
+        }
+    }
+
+    function shoot(origin, isEnemy) {
+        if(!origin) return;
+        origin.updateMatrixWorld();
+        
+        const muzzlePos = new THREE.Vector3(0, 0, 6).applyMatrix4(origin.matrixWorld);
+        const quat = new THREE.Quaternion(); 
+        origin.getWorldQuaternion(quat);
+        const dir = new THREE.Vector3(0, 0, 1).applyQuaternion(quat);
+        
+        const bulletGeom = new THREE.CylinderGeometry(0.4, 0.4, 4, 8);
+        bulletGeom.rotateX(Math.PI/2);
+        const bullet = new THREE.Mesh(
+            bulletGeom, 
+            new THREE.MeshBasicMaterial({color: isEnemy ? 0xff3333 : 0xffff00})
+        );
+        bullet.position.copy(muzzlePos); 
+        bullet.quaternion.copy(quat);
+        
+        const light = new THREE.PointLight(isEnemy ? 0xff3333 : 0xffff00, 1, 15);
+        bullet.add(light);
+        
+        bullet.userData = { 
+            vel: dir.multiplyScalar(CONFIG.bulletSpeed), 
+            life: 3, 
+            isEnemy: isEnemy 
+        };
+        
+        scene.add(bullet); 
+        bullets.push(bullet);
+        
+        // Muzzle flash
+        const flash = new THREE.Mesh(
+            new THREE.SphereGeometry(1.5, 16, 16), 
+            new THREE.MeshBasicMaterial({
+                color: isEnemy ? 0xff8888 : 0xffffff, 
+                transparent: true, 
+                opacity: 0.9
+            })
+        );
+        flash.position.copy(muzzlePos); 
+        scene.add(flash);
+        
+        let s = 1; 
+        const anim = () => { 
+            s += 0.4; 
+            flash.scale.setScalar(s); 
+            flash.material.opacity -= 0.15; 
+            if(flash.material.opacity > 0) {
+                requestAnimationFrame(anim); 
+            } else {
+                scene.remove(flash);
+                flash.geometry.dispose();
+                flash.material.dispose();
+            }
+        }; 
+        anim();
+    }
+
+    function lerpAngle(a, b, t) {
+        let diff = b - a; 
+        while (diff > Math.PI) diff -= Math.PI * 2; 
+        while (diff < -Math.PI) diff += Math.PI * 2; 
+        return a + diff * t;
+    }
+
+    window.startGame = function(role) {
+        try {
+            if(window.gameState.gameStarted && role !== 'p1_waiting') return;
+            
+            const uiLayer = document.getElementById('ui-layer');
+            const hpBar = document.getElementById('hp-bar');
+            const settingsPanel = document.getElementById('settings-panel');
+            const connStatus = document.getElementById('connection-status');
+            
+            if(role === 'p1_waiting') {
+                // Still waiting, show game but not fully started
+                if(uiLayer) uiLayer.style.display = 'none';
+                if(hpBar) hpBar.style.display = 'block';
+                if(settingsPanel) settingsPanel.style.display = 'flex';
+                if(connStatus) connStatus.style.display = 'block';
+                window.gameState.running = true;
+                return;
+            }
+            
+            if(uiLayer) uiLayer.style.display = 'none';
+            if(hpBar) hpBar.style.display = 'block';
+            if(settingsPanel) settingsPanel.style.display = 'flex';
+            if(connStatus) connStatus.style.display = 'block';
+            
+            window.gameState.running = true;
+            window.gameState.gameStarted = true;
+            window.gameState.myRole = role;
+            window.gameState.myHP = 5;
+            window.gameState.enemyHP = 5;
+            window.gameState.lastProcessedHits = 0;
+            updateHPUI();
+            
+            let label = "單人試駕";
+            if(role === 'p1') label = "我是 P1 (藍方)";
+            if(role === 'p2') label = "我是 P2 (紅方)";
+            
+            const debugEl = document.getElementById('debug-status');
+            if(debugEl) debugEl.innerText = `狀態: 遊戲中 (${label})`;
+            
+            const roleDebugEl = document.getElementById('role-debug');
+            if(roleDebugEl) roleDebugEl.innerText = label;
+            
+            if (myTank && enemyTank) {
+                // Reset positions based on role
+                if (role === 'p1' || role === 'offline') {
+                    myTank.position.set(0, 0, 60); 
+                    myTank.rotation.y = Math.PI;
+                    enemyTank.position.set(0, 0, -60); 
+                    enemyTank.rotation.y = 0;
+                } else if (role === 'p2') {
+                    myTank.position.set(0, 0, -60); 
+                    myTank.rotation.y = 0;
+                    enemyTank.position.set(0, 0, 60); 
+                    enemyTank.rotation.y = Math.PI;
+                }
+                
+                // Reset turrets
+                if(myTurret) myTurret.rotation.y = 0;
+                if(enemyTurret) enemyTurret.rotation.y = 0;
+                
+                window.gameState.positionSet = true;
+            }
+        } catch (e) {
+            console.error("StartGame Error:", e);
         }
     };
 
     window.gameInterface.onRemoteUpdate = function(state) {
-        if(!enemyTank) return;
+        if(!enemyTank || !window.gameState.running) return;
+        
         const tPos = new THREE.Vector3(state.x, state.y, state.z);
         enemyTank.position.lerp(tPos, 0.3);
         enemyTank.rotation.y = lerpAngle(enemyTank.rotation.y, state.ry, 0.3);
-        enemyTurret.rotation.y = lerpAngle(enemyTurret.rotation.y, state.ty, 0.3);
-        enemyBarrel.rotation.x = lerpAngle(enemyBarrel.rotation.x, state.bx, 0.3);
-        if(state.hp !== undefined) {
-            window.gameState.enemyHP = state.hp;
-            updateHPUI();
+        
+        if(enemyTurret) {
+            enemyTurret.rotation.y = lerpAngle(enemyTurret.rotation.y, state.ty, 0.3);
+        }
+        if(enemyBarrel) {
+            enemyBarrel.rotation.x = lerpAngle(enemyBarrel.rotation.x, state.bx, 0.3);
         }
     };
 
     window.gameInterface.onRemoteFire = function() {
-        if(enemyBarrel) { enemyBarrel.position.z = 1.0; shoot(enemyBarrel, true); }
+        if(enemyBarrel) { 
+            enemyBarrel.position.z = 1.0; 
+            shoot(enemyBarrel, true); 
+        }
     };
 
     window.gameInterface.onGameOver = function(win) {
         window.gameState.running = false;
-        document.getElementById('ui-layer').style.display = 'flex';
-        document.getElementById('lobby-panel').style.display = 'none';
-        document.getElementById('game-over-panel').style.display = 'block';
-        document.getElementById('end-title').innerText = win ? "VICTORY" : "DEFEAT";
-        document.getElementById('end-title').style.color = win ? "#0f0" : "#f00";
+        
+        const uiLayer = document.getElementById('ui-layer');
+        if(uiLayer) uiLayer.style.display = 'flex';
+        
+        const lobbyPanel = document.getElementById('lobby-panel');
+        if(lobbyPanel) lobbyPanel.style.display = 'none';
+        
+        const gameOverPanel = document.getElementById('game-over-panel');
+        if(gameOverPanel) gameOverPanel.style.display = 'block';
+        
+        const endTitle = document.getElementById('end-title');
+        if(endTitle) {
+            endTitle.innerText = win ? "VICTORY!" : "DEFEAT";
+            endTitle.style.color = win ? "#00ff00" : "#ff0000";
+        }
+        
+        const endReason = document.getElementById('end-reason');
+        if(endReason) {
+            endReason.innerText = win ? "恭喜！你擊敗了對手！" : "你被擊敗了...";
+        }
     };
 
     function initThree() {
         const container = document.getElementById('canvas-container');
-        scene = new THREE.Scene(); scene.background = new THREE.Color(0x1a1a1a); scene.fog = new THREE.Fog(0x1a1a1a, 20, 150);
-        camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 0.1, 500);
+        
+        scene = new THREE.Scene(); 
+        scene.background = new THREE.Color(0x1a1a1a); 
+        scene.fog = new THREE.Fog(0x1a1a1a, 20, 150);
+        
+        camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 500);
         camera.position.set(0, 20, -30);
         
-        renderer = new THREE.WebGLRenderer({antialias:true}); renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer = new THREE.WebGLRenderer({antialias: true}); 
+        renderer.setSize(window.innerWidth, window.innerHeight);
         renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
         container.appendChild(renderer.domElement);
 
-        const light = new THREE.DirectionalLight(0xffeeb1, 1); light.position.set(20, 50, -20); light.castShadow = true;
-        light.shadow.mapSize.width = 2048; light.shadow.mapSize.height = 2048;
-        scene.add(light); scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+        // Lighting
+        const sunLight = new THREE.DirectionalLight(0xffeeb1, 1); 
+        sunLight.position.set(20, 50, -20); 
+        sunLight.castShadow = true;
+        sunLight.shadow.mapSize.width = 2048; 
+        sunLight.shadow.mapSize.height = 2048;
+        sunLight.shadow.camera.near = 0.5;
+        sunLight.shadow.camera.far = 150;
+        sunLight.shadow.camera.left = -80;
+        sunLight.shadow.camera.right = 80;
+        sunLight.shadow.camera.top = 80;
+        sunLight.shadow.camera.bottom = -80;
+        scene.add(sunLight); 
+        scene.add(new THREE.AmbientLight(0xffffff, 0.6));
 
-        const plane = new THREE.Mesh(new THREE.PlaneGeometry(MAP_SIZE, MAP_SIZE), new THREE.MeshStandardMaterial({color:0x333333, roughness:0.8}));
-        plane.rotation.x = -Math.PI/2; plane.receiveShadow = true; plane.userData.type='ground'; scene.add(plane);
-        const grid = new THREE.GridHelper(MAP_SIZE, 40, 0x555555, 0x222222); scene.add(grid);
+        // Ground
+        const groundGeom = new THREE.PlaneGeometry(MAP_SIZE, MAP_SIZE);
+        const groundMat = new THREE.MeshStandardMaterial({color: 0x333333, roughness: 0.8});
+        const plane = new THREE.Mesh(groundGeom, groundMat);
+        plane.rotation.x = -Math.PI / 2; 
+        plane.receiveShadow = true; 
+        plane.userData.type = 'ground'; 
+        scene.add(plane);
+        
+        const grid = new THREE.GridHelper(MAP_SIZE, 40, 0x555555, 0x222222); 
+        scene.add(grid);
+        
         createWalls();
 
+        // Create player tank
         const p1 = createModel(0x4B5320, false);
-        myTank = p1.root; myTurret = p1.turret; myBarrel = p1.barrel;
+        myTank = p1.root; 
+        myTurret = p1.turret; 
+        myBarrel = p1.barrel;
         addLaser(myBarrel);
-        const marker = new THREE.Mesh(new THREE.ConeGeometry(0.5, 1, 8), new THREE.MeshBasicMaterial({color: 0x00ff00}));
-        marker.rotation.x = Math.PI; marker.position.y = 5; myTank.add(marker);
+        
+        // Player indicator
+        const markerGeom = new THREE.ConeGeometry(0.5, 1, 8);
+        const markerMat = new THREE.MeshBasicMaterial({color: 0x00ff00});
+        const marker = new THREE.Mesh(markerGeom, markerMat);
+        marker.rotation.x = Math.PI; 
+        marker.position.y = 5; 
+        myTank.add(marker);
+        
+        myTank.position.set(0, 0, 60); 
+        myTank.rotation.y = Math.PI;
         scene.add(myTank);
 
+        // Create enemy tank
         const p2 = createModel(0xAA3333, true);
-        enemyTank = p2.root; enemyTurret = p2.turret; enemyBarrel = p2.barrel;
+        enemyTank = p2.root; 
+        enemyTurret = p2.turret; 
+        enemyBarrel = p2.barrel;
+        enemyTank.position.set(0, 0, -60); 
         scene.add(enemyTank);
 
+        // Create obstacles
+        const boxGeom = new THREE.BoxGeometry(6, 6, 6); 
+        const boxMat = new THREE.MeshStandardMaterial({color: 0x555555});
+        
+        for(let i = 0; i < 15; i++) {
+            const box = new THREE.Mesh(boxGeom, boxMat);
+            box.position.set(
+                (Math.random() - 0.5) * (MAP_SIZE - 30), 
+                3, 
+                (Math.random() - 0.5) * (MAP_SIZE - 30)
+            );
+            
+            const d1 = box.position.distanceTo(new THREE.Vector3(0, 0, 60));
+            const d2 = box.position.distanceTo(new THREE.Vector3(0, 0, -60));
+            
+            if(d1 > 25 && d2 > 25) {
+                box.castShadow = true; 
+                box.receiveShadow = true;
+                box.userData.type = 'obs'; 
+                scene.add(box);
+                obstacles.push(box);
+            }
+        }
+
         changeStyle('standard');
+        
+        // Handle window resize
+        window.addEventListener('resize', onWindowResize);
+        
         requestAnimationFrame(animate);
     }
 
+    function onWindowResize() {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+
     function createWalls() {
-        const h = 4; const geo = new THREE.BoxGeometry(MAP_SIZE, h, 2);
-        const mat = new THREE.MeshStandardMaterial({color: 0x00ffff, emissive: 0x004444, transparent: true, opacity: 0.5});
-        const pos = [[0, h/2, -MAP_SIZE/2], [0, h/2, MAP_SIZE/2], [-MAP_SIZE/2, h/2, 0, Math.PI/2], [MAP_SIZE/2, h/2, 0, Math.PI/2]];
-        pos.forEach(p => { const w = new THREE.Mesh(geo, mat); w.position.set(p[0], p[1], p[2]); if(p[3]) w.rotation.y = p[3]; w.userData.type='wall'; scene.add(w); });
+        const h = 4; 
+        const wallGeom = new THREE.BoxGeometry(MAP_SIZE, h, 2);
+        const wallMat = new THREE.MeshStandardMaterial({
+            color: 0x00ffff, 
+            emissive: 0x004444, 
+            transparent: true, 
+            opacity: 0.5
+        });
+        
+        const positions = [
+            [0, h/2, -MAP_SIZE/2, 0], 
+            [0, h/2, MAP_SIZE/2, 0], 
+            [-MAP_SIZE/2, h/2, 0, Math.PI/2], 
+            [MAP_SIZE/2, h/2, 0, Math.PI/2]
+        ];
+        
+        positions.forEach(p => { 
+            const wall = new THREE.Mesh(wallGeom, wallMat.clone()); 
+            wall.position.set(p[0], p[1], p[2]); 
+            if(p[3]) wall.rotation.y = p[3]; 
+            wall.userData.type = 'wall'; 
+            scene.add(wall); 
+        });
     }
 
     function createModel(color, isEnemy) {
         const root = new THREE.Group();
-        const bodyM = new THREE.MeshStandardMaterial({color:color});
-        const chassis = new THREE.Mesh(new THREE.BoxGeometry(4, 1.5, 6), bodyM);
-        chassis.position.y = 1.2; chassis.castShadow=true; chassis.userData.type=isEnemy?'eBody':'pBody'; root.add(chassis);
-        const tG = new THREE.Group(); tG.position.set(0, 2, 0); root.add(tG);
-        const tMesh = new THREE.Mesh(new THREE.BoxGeometry(3, 1.2, 3.5), bodyM);
-        tMesh.position.y = 0.6; tMesh.castShadow=true; tMesh.userData.type=isEnemy?'eTurret':'pTurret'; tG.add(tMesh);
-        const bG = new THREE.Group(); bG.position.set(0, 0.6, 1.5); tG.add(bG);
-        const bMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.25, 5, 16), bodyM);
-        bMesh.rotation.x = Math.PI/2; bMesh.position.z = 2.5; bMesh.castShadow=true; bMesh.userData.type=isEnemy?'eBarrel':'pBarrel'; bG.add(bMesh);
-        return { root, turret: tG, barrel: bG };
+        const bodyMat = new THREE.MeshStandardMaterial({color: color});
+        
+        // Chassis
+        const chassisGeom = new THREE.BoxGeometry(4, 1.5, 6);
+        const chassis = new THREE.Mesh(chassisGeom, bodyMat);
+        chassis.position.y = 1.2; 
+        chassis.castShadow = true; 
+        chassis.receiveShadow = true;
+        chassis.userData.type = isEnemy ? 'eBody' : 'pBody'; 
+        root.add(chassis);
+        
+        // Turret group
+        const turretGroup = new THREE.Group(); 
+        turretGroup.position.set(0, 2, 0); 
+        root.add(turretGroup);
+        
+        // Turret mesh
+        const turretGeom = new THREE.BoxGeometry(3, 1.2, 3.5);
+        const turretMesh = new THREE.Mesh(turretGeom, bodyMat);
+        turretMesh.position.y = 0.6; 
+        turretMesh.castShadow = true; 
+        turretMesh.receiveShadow = true;
+        turretMesh.userData.type = isEnemy ? 'eTurret' : 'pTurret'; 
+        turretGroup.add(turretMesh);
+        
+        // Barrel group
+        const barrelGroup = new THREE.Group(); 
+        barrelGroup.position.set(0, 0.6, 1.5); 
+        turretGroup.add(barrelGroup);
+        
+        // Barrel mesh
+        const barrelGeom = new THREE.CylinderGeometry(0.25, 0.25, 5, 16);
+        const barrelMesh = new THREE.Mesh(barrelGeom, bodyMat);
+        barrelMesh.rotation.x = Math.PI / 2; 
+        barrelMesh.position.z = 2.5; 
+        barrelMesh.castShadow = true;
+        barrelMesh.userData.type = isEnemy ? 'eBarrel' : 'pBarrel'; 
+        barrelGroup.add(barrelMesh);
+        
+        return { root, turret: turretGroup, barrel: barrelGroup };
     }
 
     function addLaser(barrelObj) {
-        const laserGeo = new THREE.CylinderGeometry(0.05, 0.05, 100, 8);
-        laserGeo.rotateX(-Math.PI / 2); laserGeo.translate(0, 0, 50);
-        const laser = new THREE.Mesh(laserGeo, new THREE.MeshBasicMaterial({ color: 0xff0000, transparent: true, opacity: 0.3, blending: THREE.AdditiveBlending }));
-        laser.position.set(0, 0, 5); barrelObj.add(laser);
-    }
-
-    function shoot(origin, isEnemy) {
-        origin.updateMatrixWorld();
-        const muzzlePos = new THREE.Vector3(0, 0, 6).applyMatrix4(origin.matrixWorld);
-        const quat = new THREE.Quaternion(); origin.getWorldQuaternion(quat);
-        const dir = new THREE.Vector3(0, 0, 1).applyQuaternion(quat);
-        const bullet = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.4, 4, 8).rotateX(Math.PI/2), new THREE.MeshBasicMaterial({color: isEnemy?0xff3333:0xffff00}));
-        bullet.position.copy(muzzlePos); bullet.quaternion.copy(quat);
-        bullet.add(new THREE.PointLight(isEnemy?0xff3333:0xffff00, 1, 15));
-        bullet.userData = { vel: dir.multiplyScalar(70), life: 3, isEnemy };
-        scene.add(bullet); bullets.push(bullet);
-        const flash = new THREE.Mesh(new THREE.SphereGeometry(1.5,16,16), new THREE.MeshBasicMaterial({color: isEnemy?0xff8888:0xffffff, transparent:true, opacity:0.9}));
-        flash.position.copy(muzzlePos); scene.add(flash);
-        let s=1; const anim = ()=>{ s+=0.4; flash.scale.setScalar(s); flash.material.opacity-=0.15; if(flash.material.opacity>0)requestAnimationFrame(anim); else scene.remove(flash);}; anim();
-    }
-
-    function lerpAngle(a, b, t) {
-        let diff = b - a; while (diff > Math.PI) diff -= Math.PI * 2; while (diff < -Math.PI) diff += Math.PI * 2; return a + diff * t;
+        const laserGeom = new THREE.CylinderGeometry(0.05, 0.05, 100, 8);
+        laserGeom.rotateX(-Math.PI / 2); 
+        laserGeom.translate(0, 0, 50);
+        
+        const laserMat = new THREE.MeshBasicMaterial({ 
+            color: 0xff0000, 
+            transparent: true, 
+            opacity: 0.3, 
+            blending: THREE.AdditiveBlending 
+        });
+        
+        const laser = new THREE.Mesh(laserGeom, laserMat);
+        laser.position.set(0, 0, 5); 
+        barrelObj.add(laser);
     }
 
     function animate() {
         requestAnimationFrame(animate);
-        const dt = clock.getDelta();
-        if(!window.gameState.running) { renderer.render(scene, camera); return; }
+        const dt = Math.min(clock.getDelta(), 0.1); // Cap delta time
+        
+        if(!window.gameState.running) { 
+            renderer.render(scene, camera); 
+            return; 
+        }
 
+        // Smooth input
         input.move.x += (target.move.x - input.move.x) * CONFIG.moveSmooth;
         input.move.y += (target.move.y - input.move.y) * CONFIG.moveSmooth;
         input.aim.x += (target.aim.x - input.aim.x) * CONFIG.aimSmooth;
         input.head.x += (target.head.x - input.head.x) * 0.1;
 
         if(myTank) {
-            // 移動邏輯 (修復版)
-            if(Math.abs(input.move.x)>0.01) myTank.rotation.y -= input.move.x*2*dt;
-            // 修正：移動方向需配合車身朝向
-            // 因為 myTank 是 Group，使用 translateZ 會沿著目前朝向移動
-            if(Math.abs(input.move.y)>0.01) myTank.translateZ(input.move.y*12*dt);
+            // Tank movement
+            if(Math.abs(input.move.x) > 0.01) {
+                myTank.rotation.y -= input.move.x * CONFIG.turnSpeed * dt;
+            }
+            if(Math.abs(input.move.y) > 0.01) {
+                myTank.translateZ(input.move.y * CONFIG.tankSpeed * dt);
+            }
             
+            // Keep tank in bounds
             myTank.position.x = Math.max(-BOUNDS, Math.min(BOUNDS, myTank.position.x));
             myTank.position.z = Math.max(-BOUNDS, Math.min(BOUNDS, myTank.position.z));
 
+            // Turret aiming
             const aimSpeed = Math.sign(input.aim.x) * Math.pow(Math.abs(input.aim.x), 1.5) * 1.5;
             myTurret.rotation.y -= aimSpeed * dt;
             myBarrel.rotation.x = 0; 
             
-            if(myBarrel.position.z < 1.5) myBarrel.position.z += 5*dt; else myBarrel.position.z = 1.5;
-            if(enemyBarrel && enemyBarrel.position.z < 1.5) enemyBarrel.position.z += 5*dt; else if(enemyBarrel) enemyBarrel.position.z = 1.5;
+            // Barrel recoil recovery
+            if(myBarrel.position.z < 1.5) {
+                myBarrel.position.z += 5 * dt; 
+            } else {
+                myBarrel.position.z = 1.5;
+            }
+            
+            if(enemyBarrel && enemyBarrel.position.z < 1.5) {
+                enemyBarrel.position.z += 5 * dt; 
+            } else if(enemyBarrel) {
+                enemyBarrel.position.z = 1.5;
+            }
 
-            const camOffsetLocal = new THREE.Vector3(input.head.x * 5, 8, -25 - Math.abs(input.head.x));
+            // Camera follow
+            const camOffsetLocal = new THREE.Vector3(input.head.x * 5, 10, -25 - Math.abs(input.head.x) * 3);
             const camTargetPos = camOffsetLocal.applyMatrix4(myTurret.matrixWorld);
             camera.position.lerp(camTargetPos, 0.1);
+            
             const lookAtOffsetLocal = new THREE.Vector3(input.head.x * 2, 0, 50); 
             const lookAtTargetPos = lookAtOffsetLocal.applyMatrix4(myTurret.matrixWorld);
             camera.lookAt(lookAtTargetPos);
 
-            if(window.networkLayer && window.networkLayer.sendState) {
+            // Send state to network
+            if(window.networkLayer && window.networkLayer.sendState && window.gameState.myRole !== 'offline') {
                 window.networkLayer.sendState({
-                    x: myTank.position.x, y: myTank.position.y, z: myTank.position.z,
-                    ry: myTank.rotation.y, ty: myTurret.rotation.y, bx: myBarrel.rotation.x, hp: window.gameState.myHP
+                    x: myTank.position.x, 
+                    y: myTank.position.y, 
+                    z: myTank.position.z,
+                    ry: myTank.rotation.y, 
+                    ty: myTurret.rotation.y, 
+                    bx: myBarrel.rotation.x, 
+                    hp: window.gameState.myHP
                 });
             }
         }
 
-        for(let i=bullets.length-1; i>=0; i--) {
+        // Update bullets
+        for(let i = bullets.length - 1; i >= 0; i--) {
             const b = bullets[i];
             b.position.add(b.userData.vel.clone().multiplyScalar(dt));
             b.userData.life -= dt;
+            
             let hit = false;
+            
             if(b.userData.isEnemy) {
-                if(b.position.distanceTo(myTank.position) < 3.5) {
-                    hit = true; takeDamage(); createExplosion(b.position);
+                // Enemy bullet hitting player
+                if(myTank && b.position.distanceTo(myTank.position) < 3.5) {
+                    hit = true; 
+                    createExplosion(b.position);
+                    // Damage is handled via network sync
                 }
             } else {
+                // Player bullet hitting enemy
                 if(enemyTank && b.position.distanceTo(enemyTank.position) < 3.5) {
-                    hit = true; createExplosion(b.position);
+                    hit = true; 
+                    createExplosion(b.position);
+                    hitEnemy();
                 }
             }
-            if(hit || Math.abs(b.position.x)>BOUNDS || Math.abs(b.position.z)>BOUNDS || b.userData.life<=0) {
-                scene.remove(b); bullets.splice(i,1);
+            
+            // Check obstacle collisions
+            for(const obs of obstacles) {
+                if(b.position.distanceTo(obs.position) < 4) {
+                    hit = true;
+                    createExplosion(b.position);
+                    break;
+                }
+            }
+            
+            // Remove bullet if hit or out of bounds
+            if(hit || Math.abs(b.position.x) > BOUNDS || Math.abs(b.position.z) > BOUNDS || b.userData.life <= 0) {
+                scene.remove(b);
+                b.geometry.dispose();
+                b.material.dispose();
+                bullets.splice(i, 1);
             }
         }
+        
         renderer.render(scene, camera);
-    }
-
-    function takeDamage() {
-        window.gameState.myHP--;
-        updateHPUI();
-        document.getElementById('damage-overlay').style.opacity = 0.5; 
-        setTimeout(()=>document.getElementById('damage-overlay').style.opacity=0, 200);
-        if(window.networkLayer && window.networkLayer.sendHit) window.networkLayer.sendHit();
-    }
-
-    function updateHPUI() {
-        document.getElementById('my-hp').innerText = "❤️".repeat(Math.max(0, window.gameState.myHP));
-        document.getElementById('enemy-hp').innerText = "❤️".repeat(Math.max(0, window.gameState.enemyHP));
     }
 
     window.changeStyle = function(s) {
         window.gameState.style = s;
-        const colors = { standard: [0x1a1a1a, 0x4B5320, 0xAA3333], cyber: [0x000000, 0x00ff00, 0xff0000], toon: [0x87CEEB, 0x228B22, 0xFF4500] };
+        
+        const colors = { 
+            standard: [0x1a1a1a, 0x4B5320, 0xAA3333], 
+            cyber: [0x000000, 0x00ff00, 0xff0000], 
+            toon: [0x87CEEB, 0x228B22, 0xFF4500] 
+        };
+        
         const c = colors[s];
-        scene.background = new THREE.Color(c[0]); scene.fog.color.setHex(c[0]);
-        scene.traverse(o => {
-            if(o.isMesh && o.userData.type) {
+        scene.background = new THREE.Color(c[0]); 
+        scene.fog.color.setHex(c[0]);
+        
+        scene.traverse(obj => {
+            if(obj.isMesh && obj.userData.type) {
                 let col = 0x888888;
-                if(o.userData.type.includes('p')) col = c[1];
-                else if(o.userData.type.includes('e')) col = c[2];
-                else if(o.userData.type==='ground') col = s==='cyber'?0x000000:(s==='toon'?0x7CFC00:0x333333);
-                else if(o.userData.type==='wall') col = s==='cyber'?0x00ff00:0x00ffff;
-                o.material = s==='toon' ? new THREE.MeshToonMaterial({color:col}) : (s==='cyber'? new THREE.MeshBasicMaterial({color:col, wireframe:true}) : (o.userData.type==='wall'?o.material:new THREE.MeshStandardMaterial({color:col})));
+                
+                if(obj.userData.type.includes('p')) col = c[1];
+                else if(obj.userData.type.includes('e')) col = c[2];
+                else if(obj.userData.type === 'ground') col = s === 'cyber' ? 0x000000 : (s === 'toon' ? 0x7CFC00 : 0x333333);
+                else if(obj.userData.type === 'wall') col = s === 'cyber' ? 0x00ff00 : 0x00ffff;
+                else if(obj.userData.type === 'obs') col = s === 'cyber' ? 0x444444 : (s === 'toon' ? 0x8B4513 : 0x555555);
+                
+                if(obj.userData.type === 'wall') {
+                    obj.material = new THREE.MeshStandardMaterial({
+                        color: col, 
+                        emissive: s === 'cyber' ? 0x003300 : 0x004444,
+                        transparent: true, 
+                        opacity: 0.5
+                    });
+                } else if(s === 'toon') {
+                    obj.material = new THREE.MeshToonMaterial({color: col});
+                } else if(s === 'cyber') {
+                    obj.material = new THREE.MeshBasicMaterial({color: col, wireframe: true});
+                } else {
+                    obj.material = new THREE.MeshStandardMaterial({color: col});
+                }
             }
         });
-    }
-    window.toggleMirror = function() { window.gameState.mirrored=!window.gameState.mirrored; document.getElementById('btn-mirror').innerText = window.gameState.mirrored?"鏡像: 開":"鏡像: 關"; document.getElementById('output_canvas').style.transform = window.gameState.mirrored?"scaleX(-1)":"none"; document.getElementById('btn-mirror').classList.toggle('active'); }
-    window.toggleInvert = function() { window.gameState.inverted=!window.gameState.inverted; document.getElementById('btn-invert').innerText = window.gameState.inverted?"反向: 開":"反向: 關"; document.getElementById('btn-invert').classList.toggle('active'); }
+    };
 
+    window.toggleMirror = function() { 
+        window.gameState.mirrored = !window.gameState.mirrored; 
+        const btn = document.getElementById('btn-mirror');
+        const canvas = document.getElementById('output_canvas');
+        if(btn) {
+            btn.innerText = window.gameState.mirrored ? "鏡像: 開" : "鏡像: 關"; 
+            btn.classList.toggle('active', window.gameState.mirrored);
+        }
+        if(canvas) {
+            canvas.style.transform = window.gameState.mirrored ? "scaleX(-1)" : "none"; 
+        }
+    };
+
+    window.toggleInvert = function() { 
+        window.gameState.inverted = !window.gameState.inverted; 
+        const btn = document.getElementById('btn-invert');
+        if(btn) {
+            btn.innerText = window.gameState.inverted ? "反向: 開" : "反向: 關"; 
+            btn.classList.toggle('active', window.gameState.inverted);
+        }
+    };
+
+    // Initialize Three.js
     initThree();
 
-    const canvas = document.getElementById('output_canvas'), ctx = canvas.getContext('2d');
-    const holistic = new Holistic({locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/holistic/${f}`});
-    holistic.setOptions({modelComplexity: 1, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5});
-    holistic.onResults(res => {
-        document.getElementById('debug-info').innerText = "AI 運作中 | L-Hand: " + (res.leftHandLandmarks?"Yes":"No") + " | Pose: " + (res.poseLandmarks?"Yes":"No");
+    // MediaPipe setup
+    const canvas = document.getElementById('output_canvas');
+    const ctx = canvas.getContext('2d');
+    
+    const holistic = new Holistic({
+        locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/holistic/${f}`
+    });
+    
+    holistic.setOptions({
+        modelComplexity: 1, 
+        minDetectionConfidence: 0.5, 
+        minTrackingConfidence: 0.5
+    });
+    
+    holistic.onResults(results => {
+        ctx.clearRect(0, 0, 640, 480);
         
-        ctx.clearRect(0,0,640,480);
-        if(res.image) { ctx.globalAlpha=0.5; ctx.drawImage(res.image,0,0,640,480); ctx.globalAlpha=1; }
-        drawJoy(0.25, 0.6, "移動 (左手)", target.move); drawJoy(0.75, 0.6, "瞄準 (右手)", target.aim);
-        drawCooldown(0.75, 0.6, window.gameState.lastFire, CONFIG.fireCD);
-
-        // --- 核心修復：雙重偵測移動 ---
-        // 優先使用手部模型，若無則使用身體 Pose 模型 (手腕)
-        let moveX = 0, moveY = 0;
-        let detected = false;
-
-        if(res.leftHandLandmarks) {
-            drawHand(res.leftHandLandmarks);
-            moveX = (res.leftHandLandmarks[9].x - 0.25)*-2.5;
-            moveY = (res.leftHandLandmarks[9].y - 0.6)*-2.5;
-            detected = true;
-        } else if (res.poseLandmarks) {
-            // 使用 Pose Landmark 19 (左食指) 或 15 (左手腕)
-            const wrist = res.poseLandmarks[15]; // Left Wrist
-            if (wrist && wrist.visibility > 0.5) {
-                // 繪製一個替代點
-                ctx.beginPath(); ctx.arc(wrist.x*640, wrist.y*480, 10, 0, 7); ctx.fillStyle="yellow"; ctx.fill();
-                moveX = (wrist.x - 0.25)*-2.5;
-                moveY = (wrist.y - 0.6)*-2.5;
-                detected = true;
-            }
+        if(results.image) { 
+            ctx.globalAlpha = 0.5; 
+            ctx.drawImage(results.image, 0, 0, 640, 480); 
+            ctx.globalAlpha = 1; 
         }
+        
+        // Draw guide circles
+        drawJoyGuide(0.75, 0.6, "移動 (左)"); 
+        drawJoyGuide(0.25, 0.6, "瞄準 (右)");
+        drawCooldown(0.25, 0.6, window.gameState.lastFire, CONFIG.fireCD);
 
-        if (detected) {
-            if(window.gameState.inverted) moveX *= -1;
-            target.move = { x: clamp(moveX), y: clamp(moveY) };
-            drawJoyStick(0.25, 0.6, target.move.x, target.move.y, true);
+        let debugText = "AI: ";
+        if (results.leftHandLandmarks) debugText += "L✓ ";
+        else debugText += "L✗ ";
+        if (results.rightHandLandmarks) debugText += "R✓";
+        else debugText += "R✗";
+
+        // Left hand = Movement (appears on right side of screen due to mirror)
+        if (results.leftHandLandmarks) {
+            drawHand(results.leftHandLandmarks, "#00ff00");
+            
+            // In mirrored view, left hand appears at high X values (right side of canvas)
+            let rawX = results.leftHandLandmarks[9].x;
+            let rawY = results.leftHandLandmarks[9].y;
+            
+            // Center point for left hand control zone
+            const centerX = 0.75;
+            const centerY = 0.6;
+            
+            let dx = (rawX - centerX) * (window.gameState.mirrored ? -2.5 : 2.5);
+            let dy = (rawY - centerY) * -2.5;
+            
+            if(window.gameState.inverted) dx *= -1;
+            
+            target.move = { x: clamp(dx), y: clamp(dy) };
+            drawJoyStick(0.75, 0.6, target.move.x, target.move.y, false);
+            debugText += ` | M: ${target.move.x.toFixed(2)}, ${target.move.y.toFixed(2)}`;
         } else {
-            target.move = {x:0, y:0};
+            target.move = {x: 0, y: 0};
         }
-        
-        if(res.rightHandLandmarks) {
-            drawHand(res.rightHandLandmarks);
-            target.aim = { x: clamp((res.rightHandLandmarks[9].x - 0.75)*-2.5), y: 0 };
-            const pinch = Math.hypot(res.rightHandLandmarks[4].x - res.rightHandLandmarks[6].x, res.rightHandLandmarks[4].y - res.rightHandLandmarks[6].y) < 0.05;
+
+        // Right hand = Aiming + Firing (appears on left side of screen due to mirror)
+        if (results.rightHandLandmarks) {
+            drawHand(results.rightHandLandmarks, "#ff0000");
+            
+            let rawX = results.rightHandLandmarks[9].x;
+            
+            // Center point for right hand control zone
+            const centerX = 0.25;
+            
+            let dx = (rawX - centerX) * (window.gameState.mirrored ? -2.5 : 2.5);
+            
+            target.aim = { x: clamp(dx), y: 0 };
+            
+            // Pinch detection for firing
+            const thumb = results.rightHandLandmarks[4];
+            const index = results.rightHandLandmarks[8];
+            const pinchDist = Math.hypot(thumb.x - index.x, thumb.y - index.y);
+            const isPinching = pinchDist < 0.06;
+            
             const now = Date.now();
-            if(pinch && now - window.gameState.lastFire > CONFIG.fireCD && window.gameState.running) { 
+            if(isPinching && now - window.gameState.lastFire > CONFIG.fireCD && window.gameState.running) { 
                 window.gameState.lastFire = now; 
                 if(myBarrel) myBarrel.position.z = 1.0; 
                 shoot(myBarrel, false); 
-                if(window.networkLayer && window.networkLayer.sendFire) window.networkLayer.sendFire();
+                if(window.networkLayer && window.networkLayer.sendFire) {
+                    window.networkLayer.sendFire();
+                }
             }
-            drawJoyStick(0.75, 0.6, target.aim.x, target.aim.y, pinch);
-        } else target.aim = {x:0, y:0};
+            
+            drawJoyStick(0.25, 0.6, target.aim.x, 0, isPinching);
+            debugText += ` | A: ${target.aim.x.toFixed(2)}`;
+            if(isPinching) debugText += " [FIRE]";
+        } else {
+            target.aim = {x: 0, y: 0};
+        }
         
-        target.head.x = res.faceLandmarks ? (res.faceLandmarks[1].x - 0.5)*(window.gameState.mirrored?-3:3) : 0;
+        const debugData = document.getElementById('debug-data');
+        if(debugData) debugData.innerText = debugText;
+        
+        // Face tracking for camera offset
+        if(results.faceLandmarks) {
+            const noseX = results.faceLandmarks[1].x;
+            target.head.x = (noseX - 0.5) * (window.gameState.mirrored ? -3 : 3);
+        } else {
+            target.head.x = 0;
+        }
     });
 
-    const cam = new Camera(document.querySelector('.input_video'), { onFrame: async()=>{ await holistic.send({image:document.querySelector('.input_video')})}, width:640, height:480 });
+    const videoElement = document.querySelector('.input_video');
+    const cam = new Camera(videoElement, { 
+        onFrame: async () => { 
+            await holistic.send({image: videoElement});
+        }, 
+        width: 640, 
+        height: 480 
+    });
     cam.start();
 
-    function clamp(v) { return Math.max(-1, Math.min(1, Math.abs(v)<CONFIG.deadzone ? 0 : (v>0?v-CONFIG.deadzone:v+CONFIG.deadzone)/(1-CONFIG.deadzone))); }
-    function drawJoy(nx, ny, txt) { 
-        const x=nx*640, y=ny*480; 
-        ctx.beginPath(); ctx.arc(x,y,40,0,7); ctx.strokeStyle="#fff5"; ctx.stroke();
-        ctx.fillStyle="#0ff"; ctx.font="16px Arial"; ctx.textAlign="center"; 
-        ctx.save(); ctx.translate(x,y); if(window.gameState.mirrored) ctx.scale(-1,1); ctx.fillText(txt,0,60); ctx.restore();
+    function clamp(v) { 
+        const absV = Math.abs(v);
+        if(absV < CONFIG.deadzone) return 0;
+        const sign = v > 0 ? 1 : -1;
+        return sign * (absV - CONFIG.deadzone) / (1 - CONFIG.deadzone);
     }
+    
+    function drawJoyGuide(nx, ny, txt) { 
+        const x = nx * 640;
+        const y = ny * 480; 
+        
+        ctx.beginPath(); 
+        ctx.arc(x, y, 40, 0, Math.PI * 2); 
+        ctx.strokeStyle = "rgba(255,255,255,0.3)"; 
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        
+        ctx.fillStyle = "#0ff"; 
+        ctx.font = "16px Arial"; 
+        ctx.textAlign = "center"; 
+        
+        ctx.save(); 
+        ctx.translate(x, y); 
+        if(window.gameState.mirrored) ctx.scale(-1, 1); 
+        ctx.fillText(txt, 0, 60); 
+        ctx.restore();
+    }
+    
     function drawCooldown(nx, ny, last, cd) {
-        const x=nx*640, y=ny*480; const progress = Math.min(1, (Date.now() - last) / cd);
-        if(progress < 1) { ctx.beginPath(); ctx.arc(x, y, 50, -Math.PI/2, -Math.PI/2 + Math.PI*2*progress); ctx.strokeStyle = "#ff0000"; ctx.lineWidth = 5; ctx.stroke(); } 
-        else { ctx.beginPath(); ctx.arc(x, y, 50, 0, Math.PI*2); ctx.strokeStyle = "#00ff00"; ctx.lineWidth = 2; ctx.stroke(); }
+        const x = nx * 640;
+        const y = ny * 480; 
+        const progress = Math.min(1, (Date.now() - last) / cd);
+        
+        ctx.lineWidth = 4;
+        if(progress < 1) { 
+            ctx.beginPath(); 
+            ctx.arc(x, y, 50, -Math.PI/2, -Math.PI/2 + Math.PI * 2 * progress); 
+            ctx.strokeStyle = "#ff4444"; 
+            ctx.stroke(); 
+        } else { 
+            ctx.beginPath(); 
+            ctx.arc(x, y, 50, 0, Math.PI * 2); 
+            ctx.strokeStyle = "#00ff00"; 
+            ctx.lineWidth = 2;
+            ctx.stroke(); 
+        }
     }
-    function drawJoyStick(nx, ny, dx, dy, act) {
-        const cx=nx*640, cy=ny*480, tx=cx-dx*40, ty=cy-dy*40;
-        ctx.beginPath(); ctx.moveTo(cx,cy); ctx.lineTo(tx,ty); ctx.strokeStyle=act?"#f00":"#0f0"; ctx.lineWidth=3; ctx.stroke();
-        ctx.beginPath(); ctx.arc(tx,ty,10,0,7); ctx.fillStyle=act?"#f00":"#0f0"; ctx.fill();
+    
+    function drawJoyStick(nx, ny, dx, dy, active) {
+        const cx = nx * 640;
+        const cy = ny * 480;
+        const tx = cx - dx * 40;
+        const ty = cy - dy * 40;
+        
+        ctx.beginPath(); 
+        ctx.moveTo(cx, cy); 
+        ctx.lineTo(tx, ty); 
+        ctx.strokeStyle = active ? "#ff0000" : "#00ff00"; 
+        ctx.lineWidth = 3; 
+        ctx.stroke();
+        
+        ctx.beginPath(); 
+        ctx.arc(tx, ty, 10, 0, Math.PI * 2); 
+        ctx.fillStyle = active ? "#ff0000" : "#00ff00"; 
+        ctx.fill();
     }
-    function drawHand(lm) { drawConnectors(ctx, lm, HAND_CONNECTIONS, {color:'#0f0', lineWidth:1}); drawLandmarks(ctx, lm, {color:'#f00', radius:2}); }
+    
+    function drawHand(landmarks, color) { 
+        // Draw connections
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+        
+        for(const conn of HAND_CONNECTIONS) {
+            const start = landmarks[conn[0]];
+            const end = landmarks[conn[1]];
+            ctx.beginPath();
+            ctx.moveTo(start.x * 640, start.y * 480);
+            ctx.lineTo(end.x * 640, end.y * 480);
+            ctx.stroke();
+        }
+        
+        // Draw landmarks
+        ctx.fillStyle = color;
+        for(const lm of landmarks) {
+            ctx.beginPath();
+            ctx.arc(lm.x * 640, lm.y * 480, 3, 0, Math.PI * 2);
+            ctx.fill();
+        }
+    }
 </script>
 </body>
 </html>
